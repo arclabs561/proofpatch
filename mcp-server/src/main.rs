@@ -1585,6 +1585,132 @@ impl ProofloopsStdioMcp {
         )]))
     }
 
+    // ---------------------------------------------------------------------
+    // Thin stdio wrappers for the rest of the proofloops tool surface.
+    //
+    // These delegate to the existing `axum-mcp` Tool implementations so HTTP
+    // and stdio stay behaviorally consistent.
+    //
+    // Note: these take `serde_json::Value` params for minimal duplication.
+    // ---------------------------------------------------------------------
+
+    #[tool(description = "Extract the (system,user) prompt + excerpt for a lemma (`proofloops prompt`).")]
+    async fn proofloops_prompt(
+        &self,
+        params: Parameters<serde_json::Value>,
+    ) -> Result<CallToolResult, McpError> {
+        let tool = ProofloopsPromptTool;
+        let out = tool
+            .call(&params.0)
+            .await
+            .map_err(|e| McpError::invalid_params(e, None))?;
+        Ok(CallToolResult::success(vec![Content::text(out.to_string())]))
+    }
+
+    #[tool(description = "Elaboration-check a file (`proofloops verify`).")]
+    async fn proofloops_verify(
+        &self,
+        params: Parameters<serde_json::Value>,
+    ) -> Result<CallToolResult, McpError> {
+        let tool = ProofloopsVerifyTool;
+        let out = tool
+            .call(&params.0)
+            .await
+            .map_err(|e| McpError::invalid_params(e, None))?;
+        Ok(CallToolResult::success(vec![Content::text(out.to_string())]))
+    }
+
+    #[tool(description = "Elaboration-check a file, returning a small summary plus raw output (`proofloops verify`).")]
+    async fn proofloops_verify_summary(
+        &self,
+        params: Parameters<serde_json::Value>,
+    ) -> Result<CallToolResult, McpError> {
+        let tool = ProofloopsVerifySummaryTool;
+        let out = tool
+            .call(&params.0)
+            .await
+            .map_err(|e| McpError::invalid_params(e, None))?;
+        Ok(CallToolResult::success(vec![Content::text(out.to_string())]))
+    }
+
+    #[tool(description = "Locate `sorry` tokens in a file with line/col and suggested patch regions.")]
+    async fn proofloops_locate_sorries(
+        &self,
+        params: Parameters<serde_json::Value>,
+    ) -> Result<CallToolResult, McpError> {
+        let tool = ProofloopsLocateSorriesTool;
+        let out = tool
+            .call(&params.0)
+            .await
+            .map_err(|e| McpError::invalid_params(e, None))?;
+        Ok(CallToolResult::success(vec![Content::text(out.to_string())]))
+    }
+
+    #[tool(description = "Suggest a proof by running the configured LLM router (`proofloops suggest`).")]
+    async fn proofloops_suggest(
+        &self,
+        params: Parameters<serde_json::Value>,
+    ) -> Result<CallToolResult, McpError> {
+        let tool = ProofloopsSuggestTool;
+        let out = tool
+            .call(&params.0)
+            .await
+            .map_err(|e| McpError::internal_error(e, None))?;
+        Ok(CallToolResult::success(vec![Content::text(out.to_string())]))
+    }
+
+    #[tool(description = "Patch a lemma’s first `sorry` with provided Lean code, then verify (`proofloops patch`).")]
+    async fn proofloops_patch(
+        &self,
+        params: Parameters<serde_json::Value>,
+    ) -> Result<CallToolResult, McpError> {
+        let tool = ProofloopsPatchTool;
+        let out = tool
+            .call(&params.0)
+            .await
+            .map_err(|e| McpError::internal_error(e, None))?;
+        Ok(CallToolResult::success(vec![Content::text(out.to_string())]))
+    }
+
+    #[tool(description = "Patch the first `sorry` within a (line-based) region and verify.")]
+    async fn proofloops_patch_region(
+        &self,
+        params: Parameters<serde_json::Value>,
+    ) -> Result<CallToolResult, McpError> {
+        let tool = ProofloopsPatchRegionTool;
+        let out = tool
+            .call(&params.0)
+            .await
+            .map_err(|e| McpError::internal_error(e, None))?;
+        Ok(CallToolResult::success(vec![Content::text(out.to_string())]))
+    }
+
+    #[tool(description = "Build a rubberduck/ideation prompt for a lemma (no proof code; plan + next moves).")]
+    async fn proofloops_rubberduck_prompt(
+        &self,
+        params: Parameters<serde_json::Value>,
+    ) -> Result<CallToolResult, McpError> {
+        let tool = ProofloopsRubberduckPromptTool;
+        let out = tool
+            .call(&params.0)
+            .await
+            .map_err(|e| McpError::invalid_params(e, None))?;
+        Ok(CallToolResult::success(vec![Content::text(out.to_string())]))
+    }
+
+    #[tool(description = "Bounded loop: suggest → patch first `sorry` in lemma → verify (`proofloops loop`).")]
+    async fn proofloops_loop(
+        &self,
+        params: Parameters<serde_json::Value>,
+    ) -> Result<CallToolResult, McpError> {
+        let tool = ProofloopsLoopTool;
+        let out = tool
+            .call(&params.0)
+            .await
+            .map_err(|e| McpError::internal_error(e, None))?;
+        Ok(CallToolResult::success(vec![Content::text(out.to_string())]))
+    }
+
     #[tool(description = "Execute one safe agent step (no LLM): verify → mechanical fix → verify")]
     async fn proofloops_agent_step(
         &self,
