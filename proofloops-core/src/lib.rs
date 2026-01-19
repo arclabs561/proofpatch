@@ -140,6 +140,8 @@ pub struct PromptPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SorryLocation {
+    /// Matched token: `sorry` or `admit`.
+    pub token: String,
     /// 1-based line number.
     pub line: usize,
     /// 1-based column number (byte-based within the line; for display only).
@@ -459,8 +461,8 @@ pub fn extract_decl_block(text: &str, decl_name: &str) -> Result<String, String>
 
 pub fn decl_block_contains_sorry(text: &str, decl_name: &str) -> Result<bool, String> {
     let block = extract_decl_block(text, decl_name)?;
-    Ok(Regex::new(r"\bsorry\b")
-        .map_err(|e| format!("invalid sorry regex: {}", e))?
+    Ok(Regex::new(r"\b(sorry|admit)\b")
+        .map_err(|e| format!("invalid sorry/admit regex: {}", e))?
         .is_match(&block))
 }
 
@@ -477,7 +479,8 @@ pub fn patch_first_sorry_in_decl(
         .ok_or_else(|| format!("Could not find theorem/lemma/def named {}", decl_name))?;
 
     let stop = usize::min(lines.len(), start + 350);
-    let sorry_pat = Regex::new(r"\bsorry\b").map_err(|e| format!("invalid sorry regex: {}", e))?;
+    let sorry_pat =
+        Regex::new(r"\b(sorry|admit)\b").map_err(|e| format!("invalid sorry/admit regex: {}", e))?;
 
     let mut sorry_line = None;
     for j in start..stop {
@@ -492,7 +495,7 @@ pub fn patch_first_sorry_in_decl(
     }
     let Some(sorry_line) = sorry_line else {
         return Err(format!(
-            "Could not find a `sorry` token inside {}",
+            "Could not find a `sorry`/`admit` token inside {}",
             decl_name
         ));
     };
@@ -621,7 +624,8 @@ pub fn patch_first_sorry_in_region(
         return Err("Empty replacement.".to_string());
     }
 
-    let sorry_pat = Regex::new(r"\bsorry\b").map_err(|e| format!("invalid sorry regex: {}", e))?;
+    let sorry_pat =
+        Regex::new(r"\b(sorry|admit)\b").map_err(|e| format!("invalid sorry/admit regex: {}", e))?;
     let mut sorry_line = None;
     for j in start0..=end0 {
         let ln = &lines[j];
@@ -636,7 +640,7 @@ pub fn patch_first_sorry_in_region(
 
     let Some(sorry_line) = sorry_line else {
         return Err(format!(
-            "Could not find a `sorry` token between lines {}..={}",
+            "Could not find a `sorry`/`admit` token between lines {}..={}",
             start_line_1, end_line_1_inclusive
         ));
     };
@@ -725,22 +729,23 @@ pub fn locate_sorries_in_text(
 ) -> Result<Vec<SorryLocation>, String> {
     let max_results = max_results.max(1).min(500);
     let context_lines = context_lines.min(50);
-    let sorry_pat = Regex::new(r"\bsorry\b").map_err(|e| format!("invalid sorry regex: {}", e))?;
+    let sorry_pat =
+        Regex::new(r"\b(sorry|admit)\b").map_err(|e| format!("invalid sorry/admit regex: {}", e))?;
 
     fn is_ident_char(c: char) -> bool {
         c.is_ascii_alphanumeric() || c == '_' || c == '\''
     }
 
-    // Find `sorry` occurrences that are not inside:
+    // Find `sorry`/`admit` occurrences that are not inside:
     // - line comments (`-- ...`)
     // - block comments (`/- ... -/`) [best-effort]
     // - string literals (`"..."`) [best-effort: handles escapes]
     //
     // This is intentionally a lightweight lexer rather than a full Lean parser.
-    fn scan_line_for_sorry_and_update_state(
+    fn scan_line_for_sorrylike_and_update_state(
         line: &str,
         block_depth_in: usize,
-    ) -> (Option<usize>, usize) {
+    ) -> (Option<(usize, &'static str)>, usize) {
         let bs = line.as_bytes();
         let mut i = 0usize;
         let mut block_depth = block_depth_in;
@@ -801,29 +806,43 @@ pub fn locate_sorries_in_text(
                 continue;
             }
 
-            // token match: `sorry`
-            if i + 4 < bs.len()
+            // token match: `sorry` or `admit`
+            let token: Option<(&'static [u8], &'static str)> = if i + 4 < bs.len()
                 && bs[i] == b's'
                 && bs[i + 1] == b'o'
                 && bs[i + 2] == b'r'
                 && bs[i + 3] == b'r'
                 && bs[i + 4] == b'y'
             {
+                Some((&b"sorry"[..], "sorry"))
+            } else if i + 4 < bs.len()
+                && bs[i] == b'a'
+                && bs[i + 1] == b'd'
+                && bs[i + 2] == b'm'
+                && bs[i + 3] == b'i'
+                && bs[i + 4] == b't'
+            {
+                Some((&b"admit"[..], "admit"))
+            } else {
+                None
+            };
+            if let Some((tok_bytes, tok_str)) = token {
+                let tok_len = tok_bytes.len();
                 // word boundary checks (approx; ASCII identifiers only)
                 let prev = if i == 0 {
                     None
                 } else {
                     line[..i].chars().next_back()
                 };
-                let next = if i + 5 >= bs.len() {
+                let next = if i + tok_len >= bs.len() {
                     None
                 } else {
-                    line[i + 5..].chars().next()
+                    line[i + tok_len..].chars().next()
                 };
                 let left_ok = prev.map(|c| !is_ident_char(c)).unwrap_or(true);
                 let right_ok = next.map(|c| !is_ident_char(c)).unwrap_or(true);
                 if left_ok && right_ok {
-                    return (Some(i), block_depth);
+                    return (Some((i, tok_str)), block_depth);
                 }
             }
 
@@ -846,10 +865,10 @@ pub fn locate_sorries_in_text(
             continue;
         }
 
-        // Prefer token-aware scanning to avoid `"sorry"` in strings / comments.
-        let (byte_pos_opt, new_block_depth) = scan_line_for_sorry_and_update_state(ln, block_depth);
+        // Prefer token-aware scanning to avoid `"sorry"`/`"admit"` in strings / comments.
+        let (hit_opt, new_block_depth) = scan_line_for_sorrylike_and_update_state(ln, block_depth);
         block_depth = new_block_depth;
-        let Some(byte_pos) = byte_pos_opt else {
+        let Some((byte_pos, token)) = hit_opt else {
             continue;
         };
 
@@ -874,6 +893,7 @@ pub fn locate_sorries_in_text(
             let excerpt = lines[excerpt_start0..=excerpt_end0].join("\n");
 
             out.push(SorryLocation {
+                token: token.to_string(),
                 line: line_1,
                 col: col_1,
                 line_text: (*ln).to_string(),
@@ -939,7 +959,7 @@ pub fn build_proof_prompt(
 pub fn proof_system_prompt() -> String {
     [
         "You are a Lean 4 proof assistant.",
-        "Return ONLY Lean code that replaces a single `sorry` inside a `by` block.",
+        "Return ONLY Lean code that replaces a single `sorry` (or `admit`) inside a `by` block.",
         "No markdown fences. No commentary. No surrounding `theorem`/`lemma` header.",
         "Prefer short tactic proofs (`simp`, `aesop`, `nlinarith`, `omega`, `ring_nf`) and existing lemmas.",
         "If you cannot complete the proof, return a minimal partial proof with the smallest remaining goal(s).",
@@ -953,7 +973,7 @@ pub fn proof_user_prompt(excerpt: &str) -> String {
         "We are working in a Lean 4 + Mathlib project.\n\
 Here is the declaration context (excerpt):\n\n\
 {excerpt}\n\n\
-Task: provide the Lean proof code that replaces the `sorry` (the proof term only)."
+Task: provide the Lean proof code that replaces the `sorry`/`admit` (the proof term only)."
     )
 }
 
