@@ -33,16 +33,17 @@ async fn main() -> anyhow::Result<()> {
     //
     // Default to a known Lean repo inside this workspace if the env var isn't set.
     // (This path is local developer convenience, not a public contract.)
-    let repo_root = std::env::var("PROOFYLOOPS_SMOKE_REPO_ROOT").unwrap_or_else(|_| {
-        "/Users/arc/Documents/dev/geometry-of-numbers".to_string()
-    });
+    let repo_root = std::env::var("PROOFYLOOPS_SMOKE_REPO_ROOT")
+        .unwrap_or_else(|_| "/Users/arc/Documents/dev/geometry-of-numbers".to_string());
     let file = std::env::var("PROOFYLOOPS_SMOKE_FILE")
         .unwrap_or_else(|_| "Covolume/Cauchy/Main.lean".to_string());
 
     let service = ()
-        .serve(TokioChildProcess::new(Command::new(&bin).configure(|cmd| {
-            cmd.arg("mcp-stdio");
-        }))?)
+        .serve(TokioChildProcess::new(Command::new(&bin).configure(
+            |cmd| {
+                cmd.arg("mcp-stdio");
+            },
+        ))?)
         .await?;
 
     let info = service.peer_info();
@@ -113,4 +114,3 @@ async fn main() -> anyhow::Result<()> {
     service.cancel().await?;
     Ok(())
 }
-

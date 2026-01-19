@@ -11,6 +11,22 @@ fn arg_value(args: &[String], key: &str) -> Option<String> {
         .cloned()
 }
 
+fn arg_values(args: &[String], key: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < args.len() {
+        if args[i] == key {
+            if let Some(v) = args.get(i + 1) {
+                out.push(v.clone());
+            }
+            i = i.saturating_add(2);
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
 fn arg_flag(args: &[String], key: &str) -> bool {
     args.iter().any(|a| a == key)
 }
@@ -39,9 +55,13 @@ fn usage() -> String {
         "Commands:",
         "  triage-file --repo <path> --file <relpath> [--timeout-s N] [--max-sorries N] [--context-lines N] [--no-context-pack] [--no-prompts] [--output-json <path>]",
         "  agent-step  --repo <path> --file <relpath> [--timeout-s N] [--write] [--output-json <path>]",
+        "  prompt      --repo <path> --file <relpath> --lemma <name> [--output-json <path>]",
+        "  patch       --repo <path> --file <relpath> --lemma <name> --replacement-file <path> [--timeout-s N] [--output-json <path>]",
         "  suggest     --repo <path> --file <relpath> --lemma <name> [--timeout-s N] [--output-json <path>]",
         "  loop        --repo <path> --file <relpath> --lemma <name> [--max-iters N] [--timeout-s N] [--output-json <path>]",
         "  review-prompt --repo <path> [--scope staged|worktree] [--max-total-bytes N] [--per-file-bytes N] [--transcript-bytes N] [--cache-version STR] [--cache-model STR] [--output-json <path>]",
+        "  review-diff --repo <path> [--scope staged|worktree] [--prompt-only] [--require-key] [--timeout-s N] [--max-total-bytes N] [--per-file-bytes N] [--transcript-bytes N] [--cache-version STR] [--cache-model STR] [--output-json <path>]",
+        "  lint-style  --repo <path> [--github] --module <Root> [--module <Root> ...]",
         "  report      --repo <path> --files <relpath>... [--timeout-s N] [--max-sorries N] [--context-lines N] [--include-raw-verify] [--output-html <path>]",
         "  context-pack --repo <path> --file <relpath> [--decl <name> | --line N] [--context-lines N] [--nearby-lines N] [--max-nearby N] [--max-imports N]",
         "",
@@ -110,13 +130,21 @@ fn apply_mechanical_fixes_for_first_error(
         }
     }
 
-    (lines.join("\n") + if text.ends_with('\n') { "\n" } else { "" }, edits)
+    (
+        lines.join("\n") + if text.ends_with('\n') { "\n" } else { "" },
+        edits,
+    )
 }
 
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("");
     let rest = &args[2..];
+
+    if cmd.is_empty() || cmd == "--help" || cmd == "-h" || cmd == "help" {
+        println!("{}", usage());
+        return Ok(());
+    }
 
     match cmd {
         "triage-file" => {
@@ -149,8 +177,7 @@ fn main() -> Result<(), String> {
                 ))
                 .map_err(|e| format!("verify failed: {e}"))?;
 
-            let raw_v =
-                serde_json::to_value(raw).map_err(|e| format!("serialize verify: {e}"))?;
+            let raw_v = serde_json::to_value(raw).map_err(|e| format!("serialize verify: {e}"))?;
             let stdout = raw_v.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
             let stderr = raw_v.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
             let first_error_loc = plc::parse_first_error_loc(stdout, stderr)
@@ -158,10 +185,17 @@ fn main() -> Result<(), String> {
 
             let summary = {
                 let ok = raw_v.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
-                let timeout = raw_v.get("timeout").and_then(|v| v.as_bool()).unwrap_or(false);
-                let returncode = raw_v.get("returncode").cloned().unwrap_or(serde_json::Value::Null);
+                let timeout = raw_v
+                    .get("timeout")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let returncode = raw_v
+                    .get("returncode")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
 
-                let errors = stdout.matches(": error:").count() + stderr.matches(": error:").count();
+                let errors =
+                    stdout.matches(": error:").count() + stderr.matches(": error:").count();
                 let warnings =
                     stdout.matches(": warning:").count() + stderr.matches(": warning:").count();
 
@@ -365,8 +399,8 @@ fn main() -> Result<(), String> {
             if !abs.exists() {
                 return Err(format!("File not found: {}", abs.display()));
             }
-            let original_text =
-                std::fs::read_to_string(&abs).map_err(|e| format!("read {}: {e}", abs.display()))?;
+            let original_text = std::fs::read_to_string(&abs)
+                .map_err(|e| format!("read {}: {e}", abs.display()))?;
 
             let rt = tokio::runtime::Runtime::new()
                 .map_err(|e| format!("failed to build tokio runtime: {e}"))?;
@@ -381,8 +415,7 @@ fn main() -> Result<(), String> {
                     StdDuration::from_secs(timeout_s),
                 ))
                 .map_err(|e| format!("verify failed: {e}"))?;
-            let first_error_loc =
-                plc::parse_first_error_loc(&verify0.stdout, &verify0.stderr);
+            let first_error_loc = plc::parse_first_error_loc(&verify0.stdout, &verify0.stderr);
             let first_error_line = first_error_loc.as_ref().map(|l| l.line);
             let first_error_text = verify0
                 .stdout
@@ -480,6 +513,97 @@ fn main() -> Result<(), String> {
                 println!("{}", small.to_string());
             } else {
                 println!("{}", full.to_string());
+            }
+            Ok(())
+        }
+
+        "prompt" => {
+            let repo_root = arg_value(rest, "--repo")
+                .ok_or_else(|| "missing --repo".to_string())
+                .map(PathBuf::from)?;
+            let file = arg_value(rest, "--file").ok_or_else(|| "missing --file".to_string())?;
+            let lemma = arg_value(rest, "--lemma").ok_or_else(|| "missing --lemma".to_string())?;
+            let output_json = arg_value(rest, "--output-json").map(PathBuf::from);
+
+            let repo_root =
+                plc::find_lean_repo_root(&repo_root).map_err(|e| format!("repo_root: {e}"))?;
+            plc::load_dotenv_smart(&repo_root);
+
+            let payload = plc::build_proof_prompt(&repo_root, &file, &lemma)?;
+            let out = serde_json::to_value(payload).map_err(|e| format!("json encode: {e}"))?;
+
+            if let Some(p) = output_json {
+                write_json(&p, &out)?;
+                println!(
+                    "{}",
+                    json!({"ok": true, "written": p.display().to_string()}).to_string()
+                );
+            } else {
+                println!("{}", out.to_string());
+            }
+            Ok(())
+        }
+
+        "patch" => {
+            let repo_root = arg_value(rest, "--repo")
+                .ok_or_else(|| "missing --repo".to_string())
+                .map(PathBuf::from)?;
+            let file = arg_value(rest, "--file").ok_or_else(|| "missing --file".to_string())?;
+            let lemma = arg_value(rest, "--lemma").ok_or_else(|| "missing --lemma".to_string())?;
+            let replacement_file = arg_value(rest, "--replacement-file")
+                .ok_or_else(|| "missing --replacement-file".to_string())
+                .map(PathBuf::from)?;
+            let timeout_s = arg_u64(rest, "--timeout-s").unwrap_or(120);
+            let output_json = arg_value(rest, "--output-json").map(PathBuf::from);
+
+            let repo_root =
+                plc::find_lean_repo_root(&repo_root).map_err(|e| format!("repo_root: {e}"))?;
+            plc::load_dotenv_smart(&repo_root);
+
+            let abs = repo_root.join(&file);
+            if !abs.exists() {
+                return Err(format!("File not found: {}", abs.display()));
+            }
+            let original_text = std::fs::read_to_string(&abs)
+                .map_err(|e| format!("read {}: {e}", abs.display()))?;
+            let replacement = std::fs::read_to_string(&replacement_file)
+                .map_err(|e| format!("read {}: {e}", replacement_file.display()))?;
+
+            let patched = plc::patch_first_sorry_in_decl(&original_text, &lemma, &replacement)?;
+            let still_has_sorry = plc::decl_block_contains_sorry(&patched.text, &lemma)?;
+
+            let rt = tokio::runtime::Runtime::new()
+                .map_err(|e| format!("failed to build tokio runtime: {e}"))?;
+            let verify = rt
+                .block_on(plc::verify_lean_text(
+                    &repo_root,
+                    &patched.text,
+                    StdDuration::from_secs(timeout_s),
+                ))
+                .map_err(|e| format!("verify failed: {e}"))?;
+
+            let out = json!({
+                "repo_root": repo_root.display().to_string(),
+                "file": file,
+                "lemma": lemma,
+                "patch": {
+                    "line": patched.line,
+                    "before": patched.before,
+                    "after": patched.after,
+                    "indent": patched.indent,
+                },
+                "lemma_still_contains_sorry": still_has_sorry,
+                "verify": verify,
+            });
+
+            if let Some(p) = output_json {
+                write_json(&p, &out)?;
+                println!(
+                    "{}",
+                    json!({"ok": true, "written": p.display().to_string()}).to_string()
+                );
+            } else {
+                println!("{}", out.to_string());
             }
             Ok(())
         }
@@ -584,7 +708,9 @@ fn main() -> Result<(), String> {
                 let replacement = suggestion
                     .get("suggestion")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "LLM suggestion did not contain `suggestion` field".to_string())?;
+                    .ok_or_else(|| {
+                        "LLM suggestion did not contain `suggestion` field".to_string()
+                    })?;
 
                 let patched = plc::patch_first_sorry_in_decl(&cur_text, &lemma, replacement)?;
                 cur_text = patched.text.clone();
@@ -646,9 +772,10 @@ fn main() -> Result<(), String> {
             let max_total_bytes = arg_u64(rest, "--max-total-bytes").unwrap_or(180_000) as usize;
             let per_file_bytes = arg_u64(rest, "--per-file-bytes").unwrap_or(24_000) as usize;
             let transcript_bytes = arg_u64(rest, "--transcript-bytes").unwrap_or(24_000) as usize;
-            let cache_version = arg_value(rest, "--cache-version")
-                .unwrap_or_else(|| "2026-01-19-v1".to_string());
-            let cache_model = arg_value(rest, "--cache-model").unwrap_or_else(|| "unknown".to_string());
+            let cache_version =
+                arg_value(rest, "--cache-version").unwrap_or_else(|| "2026-01-19-v1".to_string());
+            let cache_model =
+                arg_value(rest, "--cache-model").unwrap_or_else(|| "unknown".to_string());
             let output_json = arg_value(rest, "--output-json").map(PathBuf::from);
 
             let scope_enum = match scope.as_str() {
@@ -680,6 +807,171 @@ fn main() -> Result<(), String> {
                 println!("{}", out.to_string());
             }
             Ok(())
+        }
+
+        "review-diff" => {
+            let repo_root = arg_value(rest, "--repo")
+                .ok_or_else(|| "missing --repo".to_string())
+                .map(PathBuf::from)?;
+            let scope = arg_value(rest, "--scope").unwrap_or_else(|| "worktree".to_string());
+            let prompt_only = arg_flag(rest, "--prompt-only");
+            let require_key = arg_flag(rest, "--require-key");
+            let timeout_s = arg_u64(rest, "--timeout-s").unwrap_or(90);
+            let max_total_bytes = arg_u64(rest, "--max-total-bytes").unwrap_or(180_000) as usize;
+            let per_file_bytes = arg_u64(rest, "--per-file-bytes").unwrap_or(24_000) as usize;
+            let transcript_bytes = arg_u64(rest, "--transcript-bytes").unwrap_or(24_000) as usize;
+            let cache_version =
+                arg_value(rest, "--cache-version").unwrap_or_else(|| "2026-01-19-v1".to_string());
+            let cache_model =
+                arg_value(rest, "--cache-model").unwrap_or_else(|| "unknown".to_string());
+            let output_json = arg_value(rest, "--output-json").map(PathBuf::from);
+
+            let scope_enum = match scope.as_str() {
+                "staged" => plc::review::ReviewScope::Staged,
+                "worktree" => plc::review::ReviewScope::Worktree,
+                _ => return Err("scope must be staged|worktree".to_string()),
+            };
+
+            // Determine git root for env loading (LLM keys often live in <repo>/.env).
+            let git_root = plc::review::git_repo_root(&repo_root)?;
+            plc::load_dotenv_smart(&git_root);
+
+            let prompt = plc::review::build_review_prompt(
+                &git_root,
+                scope_enum,
+                max_total_bytes,
+                per_file_bytes,
+                transcript_bytes,
+                &cache_model,
+                &cache_version,
+            )?;
+
+            // Redact before emitting or sending.
+            let diff = plc::review::redact_secrets(&prompt.diff);
+            let corpus = plc::review::redact_secrets(&prompt.corpus);
+            let transcript_tail = plc::review::redact_secrets(&prompt.transcript_tail);
+
+            let system = [
+                "You are a skeptical code reviewer for a Lean/mathlib-focused repository.",
+                "Priorities:",
+                "- correctness and proof soundness",
+                "- API stability / portability (Linux case sensitivity, CI)",
+                "- minimal diffs (prefer small fixes)",
+                "Avoid praise. If unsure, say what is missing.",
+                "Return a concise review with concrete, actionable fixes.",
+                "",
+            ]
+            .join("\n");
+
+            let payload = json!({
+                "repo_root": prompt.repo_root,
+                "scope": prompt.scope,
+                "selected_files": prompt.selected_files,
+                "diff": diff,
+                "corpus": corpus,
+                "transcript_tail": transcript_tail,
+                "cache_key": prompt.cache_key,
+                "max_total_bytes": prompt.max_total_bytes,
+            });
+
+            let user = serde_json::to_string(&payload).map_err(|e| format!("json encode: {e}"))?;
+
+            if prompt_only {
+                let out = json!({
+                    "repo_root": payload.get("repo_root").cloned().unwrap_or(serde_json::Value::Null),
+                    "scope": payload.get("scope").cloned().unwrap_or(serde_json::Value::Null),
+                    "system": system,
+                    "payload": payload,
+                    "user": user,
+                });
+                if let Some(p) = output_json {
+                    write_json(&p, &out)?;
+                    println!(
+                        "{}",
+                        json!({"ok": true, "written": p.display().to_string()}).to_string()
+                    );
+                } else {
+                    println!("{}", out.to_string());
+                }
+                return Ok(());
+            }
+
+            let rt = tokio::runtime::Runtime::new()
+                .map_err(|e| format!("failed to build tokio runtime: {e}"))?;
+
+            let res = rt.block_on(plc::llm::chat_completion(
+                &system,
+                &user,
+                StdDuration::from_secs(timeout_s),
+            ));
+
+            let out = match res {
+                Ok(r) => json!({
+                    "repo_root": payload.get("repo_root").cloned().unwrap_or(serde_json::Value::Null),
+                    "scope": payload.get("scope").cloned().unwrap_or(serde_json::Value::Null),
+                    "provider": r.provider,
+                    "model": r.model,
+                    "review": r.content,
+                    "cache_key": payload.get("cache_key").cloned().unwrap_or(serde_json::Value::Null),
+                }),
+                Err(e) => {
+                    if require_key {
+                        return Err(format!("review-diff failed: {e}"));
+                    }
+                    // Keep "skip" behavior non-fatal, but structured for agents.
+                    json!({
+                        "skipped": true,
+                        "reason": e,
+                        "repo_root": payload.get("repo_root").cloned().unwrap_or(serde_json::Value::Null),
+                        "scope": payload.get("scope").cloned().unwrap_or(serde_json::Value::Null),
+                        "cache_key": payload.get("cache_key").cloned().unwrap_or(serde_json::Value::Null),
+                    })
+                }
+            };
+
+            if let Some(p) = output_json {
+                write_json(&p, &out)?;
+                println!(
+                    "{}",
+                    json!({"ok": true, "written": p.display().to_string()}).to_string()
+                );
+            } else {
+                println!("{}", out.to_string());
+            }
+            Ok(())
+        }
+
+        "lint-style" => {
+            let repo_root = arg_value(rest, "--repo")
+                .ok_or_else(|| "missing --repo".to_string())
+                .map(PathBuf::from)?;
+            let github = arg_flag(rest, "--github");
+            let modules = arg_values(rest, "--module");
+            if modules.is_empty() {
+                return Err("lint-style requires at least one --module <Root>".to_string());
+            }
+
+            let repo_root =
+                plc::find_lean_repo_root(&repo_root).map_err(|e| format!("repo_root: {e}"))?;
+            let lake = plc::resolve_lake();
+
+            let mut cmd = std::process::Command::new(lake);
+            cmd.arg("exe").arg("lint-style");
+            if github {
+                cmd.arg("--github");
+            }
+            for m in modules {
+                cmd.arg(m);
+            }
+            let status = cmd
+                .current_dir(&repo_root)
+                .status()
+                .map_err(|e| format!("failed to run lake lint-style: {e}"))?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("lint-style failed with status: {status}"))
+            }
         }
 
         "report" => {
@@ -731,11 +1023,13 @@ fn main() -> Result<(), String> {
                 let ok = raw_v.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
                 let stdout = raw_v.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
                 let stderr = raw_v.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
-                let errors = stdout.matches(": error:").count() + stderr.matches(": error:").count();
+                let errors =
+                    stdout.matches(": error:").count() + stderr.matches(": error:").count();
                 let warnings =
                     stdout.matches(": warning:").count() + stderr.matches(": warning:").count();
 
-                let locs = plc::locate_sorries_in_file(&repo_root, file, max_sorries, context_lines)?;
+                let locs =
+                    plc::locate_sorries_in_file(&repo_root, file, max_sorries, context_lines)?;
 
                 table.push(json!({
                     "file": file,
@@ -856,4 +1150,3 @@ fn main() -> Result<(), String> {
         _ => Err(usage()),
     }
 }
-

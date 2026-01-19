@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
- 
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatCompletionResult {
     pub provider: String,
@@ -9,7 +9,7 @@ pub struct ChatCompletionResult {
     pub content: String,
     pub raw: Value,
 }
- 
+
 #[derive(Debug, Clone)]
 struct Provider {
     name: &'static str,
@@ -17,7 +17,7 @@ struct Provider {
     api_key_env: Option<&'static str>,
     model_env: &'static str,
 }
- 
+
 fn providers_from_env() -> Vec<Provider> {
     vec![
         Provider {
@@ -62,10 +62,14 @@ fn providers_from_env() -> Vec<Provider> {
         },
     ]
 }
- 
+
 fn provider_order() -> Vec<String> {
     // Preserve legacy env fallbacks (proofyloops/proofloops/leanpot).
-    for k in ["PROOFYLOOPS_PROVIDER_ORDER", "PROOFLOOPS_PROVIDER_ORDER", "LEANPOT_PROVIDER_ORDER"] {
+    for k in [
+        "PROOFYLOOPS_PROVIDER_ORDER",
+        "PROOFLOOPS_PROVIDER_ORDER",
+        "LEANPOT_PROVIDER_ORDER",
+    ] {
         if let Ok(v) = std::env::var(k) {
             let v = v.trim().to_string();
             if !v.is_empty() {
@@ -77,9 +81,14 @@ fn provider_order() -> Vec<String> {
             }
         }
     }
-    vec!["ollama".into(), "groq".into(), "openrouter".into()]
+    vec![
+        "ollama".into(),
+        "groq".into(),
+        "openai".into(),
+        "openrouter".into(),
+    ]
 }
- 
+
 fn env_nonempty(key: &str) -> bool {
     std::env::var(key)
         .ok()
@@ -89,14 +98,17 @@ fn env_nonempty(key: &str) -> bool {
         .len()
         > 0
 }
- 
+
 async fn is_ollama_reachable(base_url: &str, timeout: Duration) -> bool {
     // Match the Python client: try /v1/models first, then /api/tags.
     let client = match reqwest::Client::builder().timeout(timeout).build() {
         Ok(c) => c,
         Err(_) => return false,
     };
-    let candidates = [format!("{base_url}/v1/models"), format!("{base_url}/api/tags")];
+    let candidates = [
+        format!("{base_url}/v1/models"),
+        format!("{base_url}/api/tags"),
+    ];
     for u in candidates {
         let r = client.get(u).send().await;
         match r {
@@ -112,7 +124,7 @@ async fn is_ollama_reachable(base_url: &str, timeout: Duration) -> bool {
     }
     false
 }
- 
+
 async fn select_provider(timeout: Duration) -> Result<(Provider, String), String> {
     let provs = providers_from_env();
     for name in provider_order() {
@@ -134,27 +146,25 @@ async fn select_provider(timeout: Duration) -> Result<(Provider, String), String
         }
         return Ok((p, model));
     }
-    Err(
-        "No usable provider found. Set one of:\n\
+    Err("No usable provider found. Set one of:\n\
 - OLLAMA_MODEL (+ optional OLLAMA_HOST)\n\
 - GROQ_API_KEY and GROQ_MODEL\n\
 - OPENROUTER_API_KEY and OPENROUTER_MODEL\n\
 - OPENAI_API_KEY and OPENAI_MODEL\n\
 Optionally set PROOFYLOOPS_PROVIDER_ORDER."
-            .to_string(),
-    )
+        .to_string())
 }
- 
+
 #[derive(Debug, Deserialize)]
 struct ChatCompletionChoice {
     message: Value,
 }
- 
+
 #[derive(Debug, Deserialize)]
 struct ChatCompletionResponse {
     choices: Vec<ChatCompletionChoice>,
 }
- 
+
 /// OpenAI-compatible chat completions, with provider selection matching the legacy Python CLI.
 ///
 /// Invariants (should not change lightly):
@@ -162,9 +172,13 @@ struct ChatCompletionResponse {
 /// - uses `Authorization: Bearer <key>` when provider requires a key
 /// - OpenRouter adds `HTTP-Referer` and `X-Title` when configured
 /// - default temperature is 0.2
-pub async fn chat_completion(system: &str, user: &str, timeout: Duration) -> Result<ChatCompletionResult, String> {
+pub async fn chat_completion(
+    system: &str,
+    user: &str,
+    timeout: Duration,
+) -> Result<ChatCompletionResult, String> {
     let (provider, model) = select_provider(Duration::from_secs(3)).await?;
- 
+
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::CONTENT_TYPE,
@@ -199,7 +213,7 @@ pub async fn chat_completion(system: &str, user: &str, timeout: Duration) -> Res
             }
         }
     }
- 
+
     let payload = serde_json::json!({
         "model": model,
         "messages": [
@@ -208,7 +222,7 @@ pub async fn chat_completion(system: &str, user: &str, timeout: Duration) -> Res
         ],
         "temperature": 0.2
     });
- 
+
     let url = format!("{}/chat/completions", provider.base_url);
     let client = reqwest::Client::builder()
         .timeout(timeout)
@@ -221,9 +235,12 @@ pub async fn chat_completion(system: &str, user: &str, timeout: Duration) -> Res
         .send()
         .await
         .map_err(|e| format!("http request failed: {e}"))?;
- 
+
     let status = resp.status();
-    let raw: Value = resp.json().await.map_err(|e| format!("http json decode: {e}"))?;
+    let raw: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("http json decode: {e}"))?;
     if !status.is_success() {
         return Err(format!(
             "provider {} returned {}: {}",
@@ -232,7 +249,7 @@ pub async fn chat_completion(system: &str, user: &str, timeout: Duration) -> Res
             raw
         ));
     }
- 
+
     let parsed: ChatCompletionResponse =
         serde_json::from_value(raw.clone()).map_err(|e| format!("invalid chat response: {e}"))?;
     let msg = parsed
@@ -246,7 +263,7 @@ pub async fn chat_completion(system: &str, user: &str, timeout: Duration) -> Res
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
- 
+
     Ok(ChatCompletionResult {
         provider: provider.name.to_string(),
         model,
@@ -303,7 +320,12 @@ mod tests {
         std::env::remove_var("LEANPOT_PROVIDER_ORDER");
         assert_eq!(
             provider_order(),
-            vec!["ollama".to_string(), "groq".to_string(), "openrouter".to_string()]
+            vec![
+                "ollama".to_string(),
+                "groq".to_string(),
+                "openai".to_string(),
+                "openrouter".to_string(),
+            ]
         );
     }
 
@@ -378,7 +400,10 @@ mod tests {
             "OPENAI_API_KEY",
             "OPENAI_MODEL",
         ]);
-        std::env::set_var("PROOFYLOOPS_PROVIDER_ORDER", "openrouter,openai,groq,ollama");
+        std::env::set_var(
+            "PROOFYLOOPS_PROVIDER_ORDER",
+            "openrouter,openai,groq,ollama",
+        );
         std::env::remove_var("OLLAMA_MODEL");
         std::env::remove_var("GROQ_API_KEY");
         std::env::remove_var("GROQ_MODEL");
@@ -387,8 +412,9 @@ mod tests {
         std::env::remove_var("OPENAI_API_KEY");
         std::env::remove_var("OPENAI_MODEL");
 
-        let err = select_provider(Duration::from_millis(10)).await.unwrap_err();
+        let err = select_provider(Duration::from_millis(10))
+            .await
+            .unwrap_err();
         assert!(err.contains("No usable provider found"));
     }
 }
-

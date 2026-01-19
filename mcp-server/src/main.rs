@@ -1,6 +1,6 @@
 //! proofyloops MCP server (HTTP via axum-mcp).
 //!
-//! Exposes the existing `proofyloops` CLI as MCP tools over HTTP, by shelling out to `uvx`.
+//! Exposes `proofyloops-core` as MCP tools over HTTP/stdio.
 //!
 //! Run:
 //! ```bash
@@ -11,11 +11,11 @@
 //! Then:
 //! - `curl http://127.0.0.1:8087/health`
 //! - `curl http://127.0.0.1:8087/tools/list`
-//! - `curl -X POST http://127.0.0.1:8087/tools/call -H 'Content-Type: application/json' -d '{"name":"proofyloops_prompt","arguments":{"repo_root":"/Users/arc/Documents/dev/covolume","file":"Covolume/Legendre/Ankeny.lean","lemma":"ankeny_even_padicValNat_of_mem_primeFactors"}}'`
+//! - `curl -X POST http://127.0.0.1:8087/tools/call -H 'Content-Type: application/json' -d '{"name":"proofyloops_prompt","arguments":{"repo_root":"/Users/arc/Documents/dev/geometry-of-numbers","file":"Covolume/Legendre/Ankeny.lean","lemma":"ankeny_even_padicValNat_of_mem_primeFactors"}}'`
 //!
 //! Configuration:
 //! - `PROOFYLOOPS_MCP_ADDR` (default: `127.0.0.1:8087`)
-//! - `PROOFYLOOPS_ROOT` (optional override for where proofyloops lives; default: `..` from this crate)
+//! - `PROOFYLOOPS_MCP_TOOL_TIMEOUT_S` (default: `180`)
 
 use async_trait::async_trait;
 use axum_mcp::{
@@ -34,8 +34,7 @@ use rmcp::{
     model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
     transport::stdio,
-    ErrorData as McpError,
-    ServiceExt,
+    ErrorData as McpError, ServiceExt,
 };
 #[cfg(feature = "stdio")]
 use schemars::JsonSchema;
@@ -143,9 +142,8 @@ fn summarize_verify_like_output(raw: &Value) -> Value {
     })
 }
 
-// NOTE: `run_uvx_proofyloops_json` used to be the bridge to the Python CLI.
-// We keep the MCP server Rust-native now (proofyloops-core has the provider router),
-// so there is no reason to shell out here.
+// NOTE: The MCP server used to bridge to a Python CLI.
+// It is Rust-native now (proofyloops-core has the provider router), so there is no reason to shell out.
 
 fn proofyloops_root_from_args(args: &Value) -> Result<PathBuf, String> {
     if let Ok(env_root) = std::env::var("PROOFYLOOPS_ROOT") {
@@ -927,8 +925,9 @@ impl Tool for ProofyloopsAgentStepTool {
         if let Some(p) = output_path {
             let path = std::path::PathBuf::from(&p);
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("failed to create output dir {}: {}", parent.display(), e))?;
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    format!("failed to create output dir {}: {}", parent.display(), e)
+                })?;
             }
             let s = serde_json::to_string_pretty(&full)
                 .map_err(|e| format!("failed to encode json: {}", e))?;
@@ -1075,10 +1074,7 @@ impl Tool for ProofyloopsReportHtmlTool {
             "<p><b>repo_root</b>: <code>{}</code></p>\n",
             escape_html(&repo_root.display().to_string())
         ));
-        html.push_str(&format!(
-            "<p><b>files</b>: {}</p>\n",
-            files.len()
-        ));
+        html.push_str(&format!("<p><b>files</b>: {}</p>\n", files.len()));
 
         html.push_str("<table>\n<thead><tr><th>file</th><th>verify</th><th>sorries</th></tr></thead>\n<tbody>\n");
 
@@ -1096,7 +1092,10 @@ impl Tool for ProofyloopsReportHtmlTool {
                 .cloned()
                 .unwrap_or_default();
 
-            let ok = verify_summary.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+            let ok = verify_summary
+                .get("ok")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let counts = verify_summary
                 .get("counts")
                 .cloned()
@@ -1105,10 +1104,7 @@ impl Tool for ProofyloopsReportHtmlTool {
             let warnings = counts.get("warnings").and_then(|v| v.as_u64()).unwrap_or(0);
 
             html.push_str("<tr>");
-            html.push_str(&format!(
-                "<td><code>{}</code></td>",
-                escape_html(file)
-            ));
+            html.push_str(&format!("<td><code>{}</code></td>", escape_html(file)));
             html.push_str(&format!(
                 "<td><b>ok</b>: {}<br/><b>errors</b>: {}<br/><b>warnings</b>: {}</td>",
                 ok, errors, warnings
@@ -1230,12 +1226,8 @@ impl Tool for ProofyloopsLoopTool {
             let system = plc::proof_system_prompt();
             let user = plc::proof_user_prompt(&excerpt);
 
-            let res = plc::llm::chat_completion(
-                &system,
-                &user,
-                StdDuration::from_secs(timeout_s),
-            )
-            .await?;
+            let res = plc::llm::chat_completion(&system, &user, StdDuration::from_secs(timeout_s))
+                .await?;
 
             let suggestion = json!({
                 "provider": res.provider,
@@ -1361,7 +1353,9 @@ struct ProofyloopsStdioMcp {
 #[cfg(feature = "stdio")]
 impl ProofyloopsStdioMcp {
     fn new() -> Self {
-        Self { tool_router: Self::tool_router() }
+        Self {
+            tool_router: Self::tool_router(),
+        }
     }
 }
 
@@ -1386,15 +1380,16 @@ impl ProofyloopsStdioMcp {
         let include_prompts = params.0.include_prompts.unwrap_or(true);
         let output_path = params.0.output_path.clone();
 
-        let repo_root = plc::find_lean_repo_root(&repo_root)
-            .map_err(|e| McpError::invalid_params(e, None))?;
+        let repo_root =
+            plc::find_lean_repo_root(&repo_root).map_err(|e| McpError::invalid_params(e, None))?;
         plc::load_dotenv_smart(&repo_root);
 
         let raw = plc::verify_lean_file(&repo_root, &file, StdDuration::from_secs(timeout_s))
             .await
             .map_err(|e| McpError::internal_error(e, None))?;
-        let raw_v = serde_json::to_value(raw)
-            .map_err(|e| McpError::internal_error(format!("failed to serialize verify result: {e}"), None))?;
+        let raw_v = serde_json::to_value(raw).map_err(|e| {
+            McpError::internal_error(format!("failed to serialize verify result: {e}"), None)
+        })?;
         let summary = summarize_verify_like_output(&raw_v);
         let locs = plc::locate_sorries_in_file(&repo_root, &file, max_sorries, context_lines)
             .map_err(|e| McpError::internal_error(e, None))?;
@@ -1552,17 +1547,18 @@ impl ProofyloopsStdioMcp {
             let path = std::path::PathBuf::from(&p);
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| {
-                    McpError::internal_error(format!(
-                        "failed to create output dir {}: {}",
-                        parent.display(),
-                        e
-                    ), None)
+                    McpError::internal_error(
+                        format!("failed to create output dir {}: {}", parent.display(), e),
+                        None,
+                    )
                 })?;
             }
-            let s = serde_json::to_string_pretty(&full)
-                .map_err(|e| McpError::internal_error(format!("failed to encode json: {e}"), None))?;
-            std::fs::write(&path, s.as_bytes())
-                .map_err(|e| McpError::internal_error(format!("failed to write {}: {e}", path.display()), None))?;
+            let s = serde_json::to_string_pretty(&full).map_err(|e| {
+                McpError::internal_error(format!("failed to encode json: {e}"), None)
+            })?;
+            std::fs::write(&path, s.as_bytes()).map_err(|e| {
+                McpError::internal_error(format!("failed to write {}: {e}", path.display()), None)
+            })?;
 
             let small = serde_json::json!({
                 "ok": true,
@@ -1572,10 +1568,14 @@ impl ProofyloopsStdioMcp {
                 "sorries": locs.len(),
                 "next_action": full.get("next_action").cloned().unwrap_or(serde_json::Value::Null),
             });
-            return Ok(CallToolResult::success(vec![Content::text(small.to_string())]));
+            return Ok(CallToolResult::success(vec![Content::text(
+                small.to_string(),
+            )]));
         }
 
-        Ok(CallToolResult::success(vec![Content::text(full.to_string())]))
+        Ok(CallToolResult::success(vec![Content::text(
+            full.to_string(),
+        )]))
     }
 
     #[tool(description = "Execute one safe agent step (no LLM): verify → mechanical fix → verify")]
@@ -1589,8 +1589,8 @@ impl ProofyloopsStdioMcp {
         let write = params.0.write.unwrap_or(false);
         let output_path = params.0.output_path.clone();
 
-        let repo_root = plc::find_lean_repo_root(&repo_root)
-            .map_err(|e| McpError::invalid_params(e, None))?;
+        let repo_root =
+            plc::find_lean_repo_root(&repo_root).map_err(|e| McpError::invalid_params(e, None))?;
         plc::load_dotenv_smart(&repo_root);
 
         let abs = repo_root.join(&file);
@@ -1682,10 +1682,14 @@ impl ProofyloopsStdioMcp {
                 "written_file": wrote_file,
                 "verify1_ok": verify1.ok
             });
-            return Ok(CallToolResult::success(vec![Content::text(small.to_string())]));
+            return Ok(CallToolResult::success(vec![Content::text(
+                small.to_string(),
+            )]));
         }
 
-        Ok(CallToolResult::success(vec![Content::text(full.to_string())]))
+        Ok(CallToolResult::success(vec![Content::text(
+            full.to_string(),
+        )]))
     }
 
     #[tool(description = "Build a JSON-first context pack for file + decl/line")]
@@ -1702,8 +1706,8 @@ impl ProofyloopsStdioMcp {
         let max_nearby_decls = params.0.max_nearby_decls.unwrap_or(30) as usize;
         let max_imports = params.0.max_imports.unwrap_or(50) as usize;
 
-        let repo_root = plc::find_lean_repo_root(&repo_root)
-            .map_err(|e| McpError::invalid_params(e, None))?;
+        let repo_root =
+            plc::find_lean_repo_root(&repo_root).map_err(|e| McpError::invalid_params(e, None))?;
         let pack = plc::build_context_pack(
             &repo_root,
             &file,
@@ -1716,9 +1720,12 @@ impl ProofyloopsStdioMcp {
         )
         .map_err(|e| McpError::internal_error(e, None))?;
 
-        let out = serde_json::to_value(pack)
-            .map_err(|e| McpError::internal_error(format!("failed to serialize context pack: {e}"), None))?;
-        Ok(CallToolResult::success(vec![Content::text(out.to_string())]))
+        let out = serde_json::to_value(pack).map_err(|e| {
+            McpError::internal_error(format!("failed to serialize context pack: {e}"), None)
+        })?;
+        Ok(CallToolResult::success(vec![Content::text(
+            out.to_string(),
+        )]))
     }
 
     #[tool(description = "Triage many files and write a small HTML report")]
@@ -1732,7 +1739,9 @@ impl ProofyloopsStdioMcp {
             .call(&params.0)
             .await
             .map_err(|e| McpError::internal_error(e, None))?;
-        Ok(CallToolResult::success(vec![Content::text(out.to_string())]))
+        Ok(CallToolResult::success(vec![Content::text(
+            out.to_string(),
+        )]))
     }
 }
 

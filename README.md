@@ -7,6 +7,7 @@ This is not a full automated prover yet. The initial scope is:
 - a small **OpenAI-compatible client** that can talk to:
   - Ollama (local)
   - Groq
+  - OpenAI
   - OpenRouter
 - a **proof-suggestion** command that takes a Lean lemma statement and proposes a `by ...` proof block
 
@@ -53,16 +54,7 @@ Controls:
 
 ## Usage
 
-Show help:
-
-```bash
-uvx --from /Users/arc/Documents/dev/proofyloops proofyloops --help
-```
-
-### Rust direct CLI (no Python, no MCP)
-
-For agent loops that want **JSON-only** and don’t want to rely on `uvx`/Python, there is a small
-Rust CLI binary in `proofyloops-core`:
+The canonical interface is the Rust CLI binary in `proofyloops-core`:
 
 ```bash
 cd /Users/arc/Documents/dev/proofyloops/proofyloops-core
@@ -152,66 +144,60 @@ Arguments:
 - `write` (bool, optional; default false)
 - `output_path` (string, optional; if set, writes full JSON and returns a small summary)
 
-Print the prompt payload (no LLM call):
+Suggest a proof for a lemma in a file (LLM call):
 
 ```bash
-uvx --from /Users/arc/Documents/dev/proofyloops proofyloops prompt \
-  --repo /Users/arc/Documents/dev/geometry-of-numbers \
-  --file Covolume/Legendre/Ankeny.lean \
-  --lemma ankeny_even_padicValNat_of_mem_primeFactors
-```
-
-Verify a Lean file elaborates (via `lake env lean`):
-
-```bash
-uvx --from /Users/arc/Documents/dev/proofyloops proofyloops verify \
-  --repo /Users/arc/Documents/dev/geometry-of-numbers \
-  --file Covolume/Legendre/Ankeny.lean
-```
-
-Suggest a proof for a lemma in a file:
-
-```bash
-uvx --from /Users/arc/Documents/dev/proofyloops proofyloops suggest \
+cd /Users/arc/Documents/dev/proofyloops/proofyloops-core
+cargo run --quiet --bin proofyloops -- suggest \
   --repo /Users/arc/Documents/dev/geometry-of-numbers \
   --file Covolume/Legendre/Ankeny.lean \
   --lemma reduction_to_sum_three_squares
 ```
 
+Triage a file (verify + `sorry` scan; no LLM call):
+
+```bash
+cd /Users/arc/Documents/dev/proofyloops/proofyloops-core
+cargo run --quiet --bin proofyloops -- triage-file \
+  --repo /Users/arc/Documents/dev/geometry-of-numbers \
+  --file Covolume/Legendre/Ankeny.lean \
+  --no-prompts --no-context-pack
+```
+
 Apply a replacement (from a file) and verify (no LLM call):
 
 ```bash
-uvx --from /Users/arc/Documents/dev/proofyloops proofyloops patch \
-  --repo /Users/arc/Documents/dev/geometry-of-numbers \
-  --file Covolume/Legendre/Ankeny.lean \
-  --lemma ankeny_even_padicValNat_of_mem_primeFactors \
-  --replacement-file /tmp/replacement.lean
+# Rust-only today: use `triage-file`/`context-pack` to build a patch prompt,
+# then apply edits in your editor and re-run `triage-file` / `agent-step`.
 ```
 
 Bounded loop (suggest → patch first `sorry` in lemma → verify):
 
 ```bash
-uvx --from /Users/arc/Documents/dev/proofyloops proofyloops loop \
+cd /Users/arc/Documents/dev/proofyloops/proofyloops-core
+cargo run --quiet --bin proofyloops -- loop \
   --repo /Users/arc/Documents/dev/geometry-of-numbers \
   --file Covolume/Legendre/Ankeny.lean \
   --lemma reduction_to_sum_three_squares \
   --max-iters 3
 ```
 
-Review the repo diff with an LLM (bounded; skips sensitive paths; exits 0 if unconfigured unless `--require-key`):
+Review the repo diff with an LLM (bounded; skips sensitive paths; “skip” is non-fatal unless `--require-key`):
 
 ```bash
-uvx --from /Users/arc/Documents/dev/proofyloops proofyloops review-diff \
+cd /Users/arc/Documents/dev/proofyloops/proofyloops-core
+cargo run --quiet --bin proofyloops -- review-diff \
   --repo /Users/arc/Documents/dev/geometry-of-numbers \
-  --scope unstaged
+  --scope worktree
 ```
 
 Prompt-only (no network call; useful for piping into another reviewer):
 
 ```bash
-uvx --from /Users/arc/Documents/dev/proofyloops proofyloops review-diff \
+cd /Users/arc/Documents/dev/proofyloops/proofyloops-core
+cargo run --quiet --bin proofyloops -- review-diff \
   --repo /Users/arc/Documents/dev/geometry-of-numbers \
-  --scope unstaged \
+  --scope worktree \
   --prompt-only \
   --output-json /tmp/proofyloops-review-diff-prompt.json
 ```
@@ -234,7 +220,7 @@ There is a small Rust HTTP server that exposes `proofyloops` as MCP tools, imple
 top-level `axum-mcp` crate in this dev workspace.
 
 Most “file surgery + verification” logic lives in `proofyloops-core` (Rust). The MCP server is now
-Rust-native for provider routing too (it does not shell out to `uvx` for `suggest`/`loop`).
+Rust-native for provider routing too (it does not shell out to Python).
 
 Run:
 

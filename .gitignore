@@ -1,11 +1,6 @@
-__pycache__/
-*.pyc
 .venv/
 
-# Python build artifacts
-build/
-dist/
-*.egg-info/
+uv.lock
 
 # Rust build artifacts (proofyloops-core, mcp-server)
 target/

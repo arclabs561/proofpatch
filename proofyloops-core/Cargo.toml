@@ -18,9 +18,6 @@ reqwest = { version = "0.13.1", features = ["json", "webpki-roots", "stream"] }
 sha2 = "0.10.9"
 hex = "0.4.3"
 
-# This crate lives inside a large dev super-workspace; keep it buildable in isolation.
-[workspace]
-
 [[bin]]
 name = "proofyloops"
 path = "src/bin/proofyloops.rs"

@@ -39,8 +39,7 @@ pub struct DiagnosticLoc {
 pub fn parse_first_error_loc(stdout: &str, stderr: &str) -> Option<DiagnosticLoc> {
     // Keep it simple and fast: line-based scan + regex extraction.
     // Anchor at start-of-line to avoid matching inside multi-line diagnostics.
-    let pat = Regex::new(r"(?m)^([^:\n]+\.lean):(\d+):(\d+):\s+error:")
-        .ok()?;
+    let pat = Regex::new(r"(?m)^([^:\n]+\.lean):(\d+):(\d+):\s+error:").ok()?;
     let joined = format!("{stdout}\n{stderr}");
     let cap = pat.captures(&joined)?;
     let path = cap.get(1)?.as_str().to_string();
@@ -1091,7 +1090,9 @@ pub fn build_region_patch_prompt(
         start_line_1, end_line_1_inclusive
     ));
     user.push_str(&excerpt);
-    user.push_str("\n\nTask: provide the Lean proof code that replaces the `sorry` (the proof term only).");
+    user.push_str(
+        "\n\nTask: provide the Lean proof code that replaces the `sorry` (the proof term only).",
+    );
 
     Ok(PromptPayload {
         repo_root: repo_root.display().to_string(),
@@ -1150,10 +1151,7 @@ fn any_decl_header_regex() -> Result<Regex, String> {
         .map_err(|e| format!("invalid decl-header regex: {}", e))
 }
 
-fn extract_decl_span(
-    lines: &[&str],
-    decl_name: &str,
-) -> Result<(usize, usize, String), String> {
+fn extract_decl_span(lines: &[&str], decl_name: &str) -> Result<(usize, usize, String), String> {
     let pat = decl_header_regex(decl_name)?;
     let start0 = lines
         .iter()
@@ -1168,13 +1166,18 @@ fn extract_decl_span(
             break;
         }
     }
-    let sig_end0 = sig_end0.unwrap_or_else(|| usize::min(lines.len().saturating_sub(1), start0 + 80));
+    let sig_end0 =
+        sig_end0.unwrap_or_else(|| usize::min(lines.len().saturating_sub(1), start0 + 80));
     let tail_end0_excl = usize::min(lines.len(), sig_end0 + 1 + 40);
     let excerpt = lines[start0..tail_end0_excl].join("\n");
     Ok((start0 + 1, tail_end0_excl, excerpt))
 }
 
-fn extract_line_span(lines: &[&str], line_1: usize, context_lines: usize) -> (usize, usize, String) {
+fn extract_line_span(
+    lines: &[&str],
+    line_1: usize,
+    context_lines: usize,
+) -> (usize, usize, String) {
     let n = lines.len();
     if n == 0 {
         return (1, 1, String::new());
@@ -1201,7 +1204,11 @@ fn collect_imports(lines: &[&str], max_imports: usize) -> Vec<String> {
             continue;
         }
         // Stop once we leave the import region and hit a non-trivial line.
-        if !out.is_empty() && !t.trim().is_empty() && !t.starts_with("open ") && !t.starts_with("set_option") {
+        if !out.is_empty()
+            && !t.trim().is_empty()
+            && !t.starts_with("open ")
+            && !t.starts_with("set_option")
+        {
             break;
         }
     }
@@ -1230,7 +1237,8 @@ pub fn build_context_pack(
         return Err(format!("File not found: {}", p.display()));
     }
 
-    let txt = std::fs::read_to_string(&p).map_err(|e| format!("failed to read {}: {}", p.display(), e))?;
+    let txt = std::fs::read_to_string(&p)
+        .map_err(|e| format!("failed to read {}: {}", p.display(), e))?;
     let lines: Vec<&str> = txt.lines().collect();
     let file_lines = lines.len();
     let file_bytes = txt.as_bytes().len();
@@ -1260,7 +1268,11 @@ pub fn build_context_pack(
     } else {
         // Default: top-of-file preamble excerpt.
         let end0 = usize::min(lines.len().saturating_sub(1), 60);
-        let excerpt = if lines.is_empty() { String::new() } else { lines[..=end0].join("\n") };
+        let excerpt = if lines.is_empty() {
+            String::new()
+        } else {
+            lines[..=end0].join("\n")
+        };
         ContextFocus {
             kind: "preamble".to_string(),
             decl: None,

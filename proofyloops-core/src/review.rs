@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
- 
+
 /// A small, structured progress event (JSONL-friendly).
 ///
 /// Public invariants:
@@ -20,7 +20,7 @@ pub struct ProgressEvent {
     #[serde(default)]
     pub data: serde_json::Value,
 }
- 
+
 fn now_iso() -> String {
     // Keep it dependency-free. This is not strict RFC3339; it's “good enough”.
     // Format: seconds since epoch, plus a "Z" marker.
@@ -30,7 +30,7 @@ fn now_iso() -> String {
         .as_secs();
     format!("{secs}Z")
 }
- 
+
 fn env_mode(name: &str, default_value: &str) -> String {
     std::env::var(name)
         .ok()
@@ -38,7 +38,7 @@ fn env_mode(name: &str, default_value: &str) -> String {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| default_value.to_string())
 }
- 
+
 fn env_truthy(name: &str, default_on: bool) -> bool {
     let v = std::env::var(name).ok().unwrap_or_default();
     let v = v.trim().to_lowercase();
@@ -47,7 +47,7 @@ fn env_truthy(name: &str, default_on: bool) -> bool {
     }
     !matches!(v.as_str(), "0" | "false" | "no" | "off")
 }
- 
+
 /// Emit progress events to stderr.
 ///
 /// Controls:
@@ -64,10 +64,10 @@ pub fn emit_progress(root: &Path, mut ev: ProgressEvent) {
     if ev.ts.trim().is_empty() {
         ev.ts = now_iso();
     }
- 
+
     let want_pretty = mode.split(',').any(|s| s.trim() == "pretty");
     let want_jsonl = mode.split(',').any(|s| s.trim() == "jsonl");
- 
+
     if want_pretty {
         let msg = ev.message.trim();
         if msg.is_empty() {
@@ -94,11 +94,13 @@ pub fn emit_progress(root: &Path, mut ev: ProgressEvent) {
                 .create(true)
                 .append(true)
                 .open(&p)
-                .and_then(|mut f| std::io::Write::write_all(&mut f, format!("{line}\n").as_bytes()));
+                .and_then(|mut f| {
+                    std::io::Write::write_all(&mut f, format!("{line}\n").as_bytes())
+                });
         }
     }
 }
- 
+
 /// Best-effort redaction of obvious secret patterns.
 pub fn redact_secrets(s: &str) -> String {
     if s.trim().is_empty() {
@@ -106,19 +108,14 @@ pub fn redact_secrets(s: &str) -> String {
     }
     let mut out = s.to_string();
     // KEY=VALUE patterns
-    let re_kv = regex::Regex::new(r"(OPENROUTER_API_KEY|OPENAI_API_KEY)\s*=\s*[^\s]+")
-        .ok();
+    let re_kv = regex::Regex::new(r"(OPENROUTER_API_KEY|OPENAI_API_KEY)\s*=\s*[^\s]+").ok();
     if let Some(re) = re_kv {
-        out = re
-            .replace_all(&out, "$1=[REDACTED]")
-            .to_string();
+        out = re.replace_all(&out, "$1=[REDACTED]").to_string();
     }
     // Authorization: Bearer <token>
     let re_auth = regex::Regex::new(r"(?i)(Authorization:\s*Bearer)\s+[^\s]+").ok();
     if let Some(re) = re_auth {
-        out = re
-            .replace_all(&out, "$1 [REDACTED]")
-            .to_string();
+        out = re.replace_all(&out, "$1 [REDACTED]").to_string();
     }
     // OpenAI-ish tokens
     let re_sk = regex::Regex::new(r"\b(sk-[A-Za-z0-9_\-]{16,})\b").ok();
@@ -137,7 +134,7 @@ pub fn redact_secrets(s: &str) -> String {
     }
     out
 }
- 
+
 /// Include a small tail of the most recent Cursor agent transcript, if present.
 ///
 /// Controls:
@@ -153,7 +150,7 @@ pub fn agent_transcript_tail(max_bytes: usize) -> String {
         .unwrap_or_default()
         .trim()
         .to_string();
- 
+
     let mut candidates: Vec<PathBuf> = Vec::new();
     if !explicit.is_empty() {
         let p = PathBuf::from(explicit);
@@ -179,7 +176,9 @@ pub fn agent_transcript_tail(max_bytes: usize) -> String {
                         if let Ok(files) = std::fs::read_dir(&at) {
                             for f in files.flatten() {
                                 let p = f.path();
-                                if p.extension().and_then(|s| s.to_str()) == Some("txt") && p.is_file() {
+                                if p.extension().and_then(|s| s.to_str()) == Some("txt")
+                                    && p.is_file()
+                                {
                                     candidates.push(p);
                                 }
                             }
@@ -198,7 +197,7 @@ pub fn agent_transcript_tail(max_bytes: usize) -> String {
             .unwrap_or(SystemTime::UNIX_EPOCH)
     });
     let p = candidates.last().cloned().unwrap();
- 
+
     let raw = match std::fs::read(&p) {
         Ok(b) => b,
         Err(_) => return String::new(),
@@ -222,7 +221,7 @@ pub fn agent_transcript_tail(max_bytes: usize) -> String {
         txt
     )
 }
- 
+
 /// Conservative “never send this” filter.
 pub fn is_sensitive_path(root: &Path, p: &Path) -> bool {
     let rp = p;
@@ -232,11 +231,18 @@ pub fn is_sensitive_path(root: &Path, p: &Path) -> bool {
         .components()
         .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
         .collect();
- 
-    if rel_parts.iter().any(|x| x == ".git" || x == ".lake" || x == "lake-packages") {
+
+    if rel_parts
+        .iter()
+        .any(|x| x == ".git" || x == ".lake" || x == "lake-packages")
+    {
         return true;
     }
-    let name = rp.file_name().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+    let name = rp
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
     if name == ".env" || name.starts_with(".env.") || name == ".envrc" {
         return true;
     }
@@ -252,7 +258,11 @@ pub fn is_sensitive_path(root: &Path, p: &Path) -> bool {
     {
         return true;
     }
-    let ext = rp.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+    let ext = rp
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
     if matches!(
         ext.as_str(),
         "pdf" | "png" | "jpg" | "jpeg" | "gif" | "webp" | "zip" | "gz" | "xz" | "bz2"
@@ -261,16 +271,35 @@ pub fn is_sensitive_path(root: &Path, p: &Path) -> bool {
     }
     false
 }
- 
+
 pub fn filter_review_paths(root: &Path, paths: Vec<PathBuf>) -> Vec<PathBuf> {
     paths
         .into_iter()
         .filter(|p| !is_sensitive_path(root, p))
         .collect()
 }
- 
+
+fn is_noisy_excerpt_path(rel: &str) -> bool {
+    // Keep diffs, but don't embed huge lockfiles/config dumps as “context excerpts”.
+    let base = rel
+        .replace('\\', "/")
+        .split('/')
+        .last()
+        .unwrap_or("")
+        .to_lowercase();
+    matches!(
+        base.as_str(),
+        "uv.lock"
+            | "cargo.lock"
+            | "package-lock.json"
+            | "pnpm-lock.yaml"
+            | "yarn.lock"
+            | "poetry.lock"
+    )
+}
+
 // Intentionally no generic shell helper here; keep this module deterministic and low-risk.
- 
+
 pub fn git_repo_root(start: &Path) -> Result<PathBuf, String> {
     let out = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
@@ -286,7 +315,7 @@ pub fn git_repo_root(start: &Path) -> Result<PathBuf, String> {
     }
     Ok(PathBuf::from(s))
 }
- 
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileBlob {
     pub rel: String,
@@ -295,18 +324,22 @@ pub struct FileBlob {
     pub content: String,
     pub truncated: bool,
 }
- 
+
 pub fn read_blob(root: &Path, p: &Path, max_bytes: usize) -> Result<FileBlob, String> {
     let raw = std::fs::read(p).map_err(|e| format!("read {}: {e}", p.display()))?;
     let truncated = raw.len() > max_bytes;
-    let raw2 = if raw.len() > max_bytes { &raw[..max_bytes] } else { raw.as_slice() };
+    let raw2 = if raw.len() > max_bytes {
+        &raw[..max_bytes]
+    } else {
+        raw.as_slice()
+    };
     let mut h = Sha256::new();
     h.update(raw2);
     let mut digest = hex::encode(h.finalize());
     if truncated {
         digest = format!("prefix:{digest}");
     }
-    let content = String::from_utf8_lossy(raw2).to_string();
+    let content = redact_secrets(&String::from_utf8_lossy(raw2).to_string());
     let rel = p
         .strip_prefix(root)
         .unwrap_or(p)
@@ -320,7 +353,7 @@ pub fn read_blob(root: &Path, p: &Path, max_bytes: usize) -> Result<FileBlob, St
         truncated,
     })
 }
- 
+
 pub fn assemble_corpus(blobs: &[FileBlob], max_total_bytes: usize) -> (String, usize) {
     let mut total = 0usize;
     let mut chunks: Vec<String> = Vec::new();
@@ -347,8 +380,14 @@ pub fn assemble_corpus(blobs: &[FileBlob], max_total_bytes: usize) -> (String, u
     }
     (chunks.concat(), total)
 }
- 
-pub fn cache_key(version: &str, model: &str, scope: &str, diff_txt: &str, blobs: &[FileBlob]) -> String {
+
+pub fn cache_key(
+    version: &str,
+    model: &str,
+    scope: &str,
+    diff_txt: &str,
+    blobs: &[FileBlob],
+) -> String {
     let mut h = Sha256::new();
     h.update(version.as_bytes());
     h.update(b"\0");
@@ -366,7 +405,7 @@ pub fn cache_key(version: &str, model: &str, scope: &str, diff_txt: &str, blobs:
     }
     hex::encode(h.finalize())
 }
- 
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewPrompt {
     pub repo_root: String,
@@ -378,13 +417,13 @@ pub struct ReviewPrompt {
     pub selected_files: Vec<String>,
     pub cache_key: String,
 }
- 
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReviewScope {
     Staged,
     Worktree,
 }
- 
+
 fn git_lines(root: &Path, args: &[&str]) -> Result<Vec<String>, String> {
     let out = Command::new("git")
         .args(args)
@@ -395,9 +434,12 @@ fn git_lines(root: &Path, args: &[&str]) -> Result<Vec<String>, String> {
         return Ok(vec![]);
     }
     let s = String::from_utf8_lossy(&out.stdout).to_string();
-    Ok(s.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+    Ok(s.lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect())
 }
- 
+
 fn git_text(root: &Path, args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
         .args(args)
@@ -409,7 +451,7 @@ fn git_text(root: &Path, args: &[&str]) -> Result<String, String> {
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
- 
+
 pub fn build_review_prompt(
     repo_root: &Path,
     scope: ReviewScope,
@@ -420,7 +462,7 @@ pub fn build_review_prompt(
     cache_version: &str,
 ) -> Result<ReviewPrompt, String> {
     let repo_root = git_repo_root(repo_root)?;
- 
+
     let (paths, diff_txt, scope_name) = match scope {
         ReviewScope::Staged => {
             let files = git_lines(
@@ -454,20 +496,26 @@ pub fn build_review_prompt(
             (files, diff, "worktree".to_string())
         }
     };
- 
+    let diff_txt = redact_secrets(&diff_txt);
+
     // Filter + read blobs (bounded).
     let mut kept: Vec<PathBuf> = Vec::new();
     for rel in &paths {
         let p = repo_root.join(rel);
-        if p.is_file() && !is_sensitive_path(&repo_root, &p) {
+        if p.is_file() && !is_sensitive_path(&repo_root, &p) && !is_noisy_excerpt_path(rel) {
             kept.push(p);
         }
     }
     let selected_files: Vec<String> = kept
         .iter()
-        .map(|p| p.strip_prefix(&repo_root).unwrap_or(p).to_string_lossy().to_string())
+        .map(|p| {
+            p.strip_prefix(&repo_root)
+                .unwrap_or(p)
+                .to_string_lossy()
+                .to_string()
+        })
         .collect();
- 
+
     let mut blobs: Vec<FileBlob> = Vec::new();
     for p in &kept {
         if let Ok(b) = read_blob(&repo_root, p, per_file_max_bytes) {
@@ -476,8 +524,14 @@ pub fn build_review_prompt(
     }
     let (corpus, _bytes) = assemble_corpus(&blobs, max_total_bytes);
     let transcript_tail = agent_transcript_tail(transcript_max_bytes);
-    let ck = cache_key(cache_version, model_for_cache, &scope_name, &diff_txt, &blobs);
- 
+    let ck = cache_key(
+        cache_version,
+        model_for_cache,
+        &scope_name,
+        &diff_txt,
+        &blobs,
+    );
+
     Ok(ReviewPrompt {
         repo_root: repo_root.display().to_string(),
         scope: scope_name,
@@ -489,21 +543,23 @@ pub fn build_review_prompt(
         cache_key: ck,
     })
 }
- 
+
 #[cfg(test)]
 mod tests {
     use super::*;
- 
+
     #[test]
     fn redact_secrets_redacts_common_patterns() {
         let s = "OPENROUTER_API_KEY=abc\nAuthorization: Bearer sk-1234567890abcdef\nsk-1234567890abcdef";
         let r = redact_secrets(s);
         assert!(!r.contains("abc"));
         assert!(r.contains("OPENROUTER_API_KEY=[REDACTED]"));
-        assert!(r.to_lowercase().contains("authorization: bearer [redacted]"));
+        assert!(r
+            .to_lowercase()
+            .contains("authorization: bearer [redacted]"));
         assert!(r.contains("[REDACTED_TOKEN]"));
     }
- 
+
     #[test]
     fn cache_key_changes_when_blob_changes() {
         let b1 = FileBlob {
@@ -513,10 +569,12 @@ mod tests {
             content: "aaa".into(),
             truncated: false,
         };
-        let b2 = FileBlob { sha256: "y".into(), ..b1.clone() };
+        let b2 = FileBlob {
+            sha256: "y".into(),
+            ..b1.clone()
+        };
         let k1 = cache_key("v1", "m", "staged", "diff", &[b1]);
         let k2 = cache_key("v1", "m", "staged", "diff", &[b2]);
         assert_ne!(k1, k2);
     }
 }
-
