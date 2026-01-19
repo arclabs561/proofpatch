@@ -4,14 +4,18 @@
 //!
 //! Run:
 //! ```bash
-//! cd /Users/arc/Documents/dev/proofloops/mcp-server
-//! cargo run
+//! cargo run --quiet -p proofloops-mcp --bin proofloops-mcp
 //! ```
 //!
 //! Then:
 //! - `curl http://127.0.0.1:8087/health`
 //! - `curl http://127.0.0.1:8087/tools/list`
-//! - `curl -X POST http://127.0.0.1:8087/tools/call -H 'Content-Type: application/json' -d '{"name":"proofloops_prompt","arguments":{"repo_root":"/Users/arc/Documents/dev/geometry-of-numbers","file":"Covolume/Legendre/Ankeny.lean","lemma":"ankeny_even_padicValNat_of_mem_primeFactors"}}'`
+//! - example call:
+//! ```bash
+//! curl -X POST http://127.0.0.1:8087/tools/call \
+//!   -H 'Content-Type: application/json' \
+//!   -d '{"name":"proofloops_prompt","arguments":{"repo_root":"/abs/path/to/lean-repo","file":"Some/File.lean","lemma":"some_theorem"}}'
+//! ```
 //!
 //! Configuration:
 //! - `PROOFLOOPS_MCP_ADDR` (default: `127.0.0.1:8087`) (legacy: `PROOFYLOOPS_MCP_ADDR`)
@@ -151,21 +155,15 @@ fn proofloops_root_from_args(args: &Value) -> Result<PathBuf, String> {
             return Ok(PathBuf::from(env_root));
         }
     }
-    if let Ok(env_root) = std::env::var("PROOFYLOOPS_ROOT") {
-        if !env_root.trim().is_empty() {
-            return Ok(PathBuf::from(env_root));
-        }
-    }
     let root = extract_string_opt(args, "proofloops_root")
-        .or_else(|| extract_string_opt(args, "proofyloops_root"))
         .unwrap_or_else(|| default_proofloops_root().to_string_lossy().to_string());
     Ok(PathBuf::from(root))
 }
 
 fn repo_root_from_args(args: &Value) -> Result<PathBuf, String> {
     let repo_root = PathBuf::from(extract_string(args, "repo_root")?);
-    // Parse `proofloops_root` / `proofyloops_root` (legacy) to keep schemas honest,
-    // but do not use it for anything. Repo-root resolution is independent of helper-root.
+    // Parse `proofloops_root` to keep schemas honest, but do not use it for anything.
+    // Repo-root resolution is independent of helper-root.
     let _ = proofloops_root_from_args(args)?;
     Ok(repo_root)
 }
@@ -186,8 +184,7 @@ impl Tool for ProofyloopsPromptTool {
                 "file": { "type": "string", "description": "File path relative to repo root" },
                 "lemma": { "type": "string", "description": "Lemma name to extract" },
                 "timeout_s": { "type": "integer", "default": 30 },
-                "proofloops_root": { "type": "string", "description": "Path to proofloops (defaults to sibling of this crate)" },
-                "proofyloops_root": { "type": "string", "description": "Legacy alias for proofloops_root" }
+                "proofloops_root": { "type": "string", "description": "Path to proofloops (defaults to sibling of this crate)" }
             },
             "required": ["repo_root", "file", "lemma"]
         })
@@ -197,8 +194,7 @@ impl Tool for ProofyloopsPromptTool {
         let repo_root = repo_root_from_args(args)?;
         let file = extract_string(args, "file")?;
         let lemma = extract_string(args, "lemma")?;
-        // Keep `proofyloops_root`/`timeout_s` in the schema for backward compatibility,
-        // but the core prompt logic is now Rust-native.
+        // `proofloops_root` exists only for schema compatibility; we don't use it.
         let _ = extract_u64_opt(args, "timeout_s")?.unwrap_or(30);
         let payload = plc::build_proof_prompt(&repo_root, &file, &lemma)?;
         serde_json::to_value(payload).map_err(|e| format!("failed to serialize payload: {}", e))
@@ -220,8 +216,7 @@ impl Tool for ProofyloopsVerifyTool {
                 "repo_root": { "type": "string" },
                 "file": { "type": "string", "description": "File path relative to repo root" },
                 "timeout_s": { "type": "integer", "default": 120 },
-                "proofloops_root": { "type": "string" },
-                "proofyloops_root": { "type": "string", "description": "Legacy alias for proofloops_root" }
+                "proofloops_root": { "type": "string" }
             },
             "required": ["repo_root", "file"]
         })
@@ -252,8 +247,7 @@ impl Tool for ProofyloopsVerifySummaryTool {
                 "repo_root": { "type": "string" },
                 "file": { "type": "string", "description": "File path relative to repo root" },
                 "timeout_s": { "type": "integer", "default": 120 },
-                "proofloops_root": { "type": "string" },
-                "proofyloops_root": { "type": "string", "description": "Legacy alias for proofloops_root" }
+                "proofloops_root": { "type": "string" }
             },
             "required": ["repo_root", "file"]
         })
@@ -287,8 +281,7 @@ impl Tool for ProofyloopsSuggestTool {
                 "file": { "type": "string" },
                 "lemma": { "type": "string" },
                 "timeout_s": { "type": "integer", "default": 120 },
-                "proofloops_root": { "type": "string" },
-                "proofyloops_root": { "type": "string", "description": "Legacy alias for proofloops_root" }
+                "proofloops_root": { "type": "string" }
             },
             "required": ["repo_root", "file", "lemma"]
         })
@@ -299,8 +292,7 @@ impl Tool for ProofyloopsSuggestTool {
         let file = extract_string(args, "file")?;
         let lemma = extract_string(args, "lemma")?;
         let timeout_s = extract_u64_opt(args, "timeout_s")?.unwrap_or(120);
-        // Keep `proofyloops_root` in the schema for backward compatibility,
-        // but do not shell out; use Rust core LLM router instead.
+        // `proofloops_root` exists only for schema compatibility; we don't use it.
         let _ = proofloops_root_from_args(args)?;
 
         let payload = plc::build_proof_prompt(&repo_root, &file, &lemma)?;
@@ -339,8 +331,7 @@ impl Tool for ProofyloopsPatchTool {
                 "lemma": { "type": "string" },
                 "replacement": { "type": "string", "description": "Lean proof-term text to splice in (no markdown fences)" },
                 "timeout_s": { "type": "integer", "default": 120 },
-                "proofloops_root": { "type": "string" },
-                "proofyloops_root": { "type": "string", "description": "Legacy alias for proofloops_root" }
+                "proofloops_root": { "type": "string" }
             },
             "required": ["repo_root", "file", "lemma", "replacement"]
         })
@@ -1174,7 +1165,7 @@ impl Tool for ProofyloopsRubberduckPromptTool {
                 "lemma": { "type": "string" },
                 "diagnostics": { "type": "string", "description": "Optional Lean output/error context to include (raw stdout/stderr excerpt or JSON)" },
                 "proofloops_root": { "type": "string" },
-                "proofyloops_root": { "type": "string", "description": "Legacy alias for proofloops_root" }
+                "proofloops_root": { "type": "string" }
             },
             "required": ["repo_root", "file", "lemma"]
         })
@@ -1209,7 +1200,7 @@ impl Tool for ProofyloopsLoopTool {
                 "max_iters": { "type": "integer", "default": 3 },
                 "timeout_s": { "type": "integer", "default": 120 },
                 "proofloops_root": { "type": "string" },
-                "proofyloops_root": { "type": "string", "description": "Legacy alias for proofloops_root" }
+                "proofloops_root": { "type": "string" }
             },
             "required": ["repo_root", "file", "lemma"]
         })
@@ -1223,7 +1214,6 @@ impl Tool for ProofyloopsLoopTool {
         let timeout_s = extract_u64_opt(args, "timeout_s")?.unwrap_or(120);
 
         // Rust-native loop for suggest + patch + verify.
-        // Keep `proofyloops_root` in the schema for backward compatibility, but ignore it.
         let _ = proofloops_root_from_args(args)?;
         let repo_root = plc::find_lean_repo_root(&repo_root)?;
         plc::load_dotenv_smart(&repo_root);
@@ -1363,12 +1353,12 @@ struct AgentStepArgs {
 
 #[cfg(feature = "stdio")]
 #[derive(Clone)]
-struct ProofyloopsStdioMcp {
+struct ProofloopsStdioMcp {
     tool_router: RmcpToolRouter<Self>,
 }
 
 #[cfg(feature = "stdio")]
-impl ProofyloopsStdioMcp {
+impl ProofloopsStdioMcp {
     fn new() -> Self {
         Self {
             tool_router: Self::tool_router(),
@@ -1378,9 +1368,9 @@ impl ProofyloopsStdioMcp {
 
 #[cfg(feature = "stdio")]
 #[tool_router]
-impl ProofyloopsStdioMcp {
+impl ProofloopsStdioMcp {
     #[tool(description = "Triage a file: verify_summary + locate_sorries")]
-    async fn proofyloops_triage_file(
+    async fn proofloops_triage_file(
         &self,
         params: Parameters<RepoFileSorriesArgs>,
     ) -> Result<CallToolResult, McpError> {
@@ -1596,7 +1586,7 @@ impl ProofyloopsStdioMcp {
     }
 
     #[tool(description = "Execute one safe agent step (no LLM): verify → mechanical fix → verify")]
-    async fn proofyloops_agent_step(
+    async fn proofloops_agent_step(
         &self,
         params: Parameters<AgentStepArgs>,
     ) -> Result<CallToolResult, McpError> {
@@ -1710,7 +1700,7 @@ impl ProofyloopsStdioMcp {
     }
 
     #[tool(description = "Build a JSON-first context pack for file + decl/line")]
-    async fn proofyloops_context_pack(
+    async fn proofloops_context_pack(
         &self,
         params: Parameters<ContextPackArgs>,
     ) -> Result<CallToolResult, McpError> {
@@ -1746,7 +1736,7 @@ impl ProofyloopsStdioMcp {
     }
 
     #[tool(description = "Triage many files and write a small HTML report")]
-    async fn proofyloops_report_html(
+    async fn proofloops_report_html(
         &self,
         params: Parameters<serde_json::Value>,
     ) -> Result<CallToolResult, McpError> {
@@ -1764,11 +1754,11 @@ impl ProofyloopsStdioMcp {
 
 #[cfg(feature = "stdio")]
 #[tool_handler]
-impl rmcp::ServerHandler for ProofyloopsStdioMcp {
+impl rmcp::ServerHandler for ProofloopsStdioMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "Tools for Lean proof triage/patching loops (proofyloops). JSON-only, stdout reserved for MCP frames."
+                "Tools for Lean proof triage/patching loops (proofloops). JSON-only, stdout reserved for MCP frames."
                     .to_string(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -1786,12 +1776,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Minimal transport switch:
-    // - `proofyloops-mcp mcp-stdio` => stdio MCP server (Cursor can spawn it)
+    // - `proofloops-mcp mcp-stdio` => stdio MCP server (Cursor can spawn it)
     // - default => HTTP MCP server (daemon)
     if std::env::args().nth(1).as_deref() == Some("mcp-stdio") {
         #[cfg(feature = "stdio")]
         {
-            let service = ProofyloopsStdioMcp::new();
+            let service = ProofloopsStdioMcp::new();
             let running = service
                 .serve(stdio())
                 .await

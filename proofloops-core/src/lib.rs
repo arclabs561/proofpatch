@@ -1,3 +1,26 @@
+//! `proofloops-core`: small utilities for Lean 4 proof work.
+//!
+//! Scope:
+//! - run `lake env lean` to verify files or temporary excerpts
+//! - locate `sorry` regions and build bounded “prompt packs”
+//! - optional LLM calls via an OpenAI-compatible API (Ollama/Groq/OpenAI/OpenRouter)
+//!
+//! Output discipline:
+//! - keep outputs JSON-friendly (`serde` types)
+//! - keep any “review” payload bounded (size caps + secret redaction)
+//!
+//! Entrypoints:
+//! - the CLI binary lives in `proofloops-core/src/bin/proofloops.rs`
+//! - the MCP server wrapper lives in `proofloops/mcp-server`
+//!
+//! Environment:
+//! - Prefer `PROOFLOOPS_*`. Most settings accept `PROOFYLOOPS_*` as legacy aliases.
+//! - LLM routing can use:
+//!   - `OLLAMA_MODEL` (+ optional `OLLAMA_HOST`)
+//!   - `GROQ_API_KEY` and `GROQ_MODEL`
+//!   - `OPENAI_API_KEY` and `OPENAI_MODEL` (+ optional `OPENAI_BASE_URL`)
+//!   - `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` (+ optional `OPENROUTER_BASE_URL`)
+//!
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

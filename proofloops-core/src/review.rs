@@ -89,7 +89,7 @@ pub fn emit_progress(root: &Path, mut ev: ProgressEvent) {
             .ok()
             .filter(|s| !s.trim().is_empty())
             .map(PathBuf::from)
-            .unwrap_or_else(|| root.join(".git").join("proofyloops_review_progress.jsonl"));
+            .unwrap_or_else(|| root.join(".git").join("proofloops_review_progress.jsonl"));
         if let Some(parent) = p.parent() {
             let _ = std::fs::create_dir_all(parent);
         }

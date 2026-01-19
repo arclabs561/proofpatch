@@ -48,7 +48,7 @@ fn providers_from_env() -> Vec<Provider> {
             api_key_env: Some("OPENROUTER_API_KEY"),
             model_env: "OPENROUTER_MODEL",
         },
-        // Not in the original proofyloops Python router, but used by covolume's llm_review.
+        // Not in the original proofloops Python router, but used by covolume's llm_review.
         Provider {
             name: "openai",
             base_url: std::env::var("OPENAI_BASE_URL")
@@ -64,7 +64,7 @@ fn providers_from_env() -> Vec<Provider> {
 }
 
 fn provider_order() -> Vec<String> {
-    // Preserve legacy env fallbacks (proofyloops/proofloops/leanpot).
+    // Preserve legacy env var fallbacks (including older names).
     for k in [
         "PROOFLOOPS_PROVIDER_ORDER",
         "PROOFYLOOPS_PROVIDER_ORDER",
