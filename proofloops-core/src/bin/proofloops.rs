@@ -896,6 +896,8 @@ fn main() -> Result<(), String> {
             let corpus = plc::review::redact_secrets(&prompt.corpus);
             let transcript_tail = plc::review::redact_secrets(&prompt.transcript_tail);
 
+            // Structured review: keep it machine-readable so scripts can print a short summary.
+            // (Humans can still read the JSON; no markdown fences.)
             let system = [
                 "You are a skeptical code reviewer for a Lean/mathlib-focused repository.",
                 "Priorities:",
@@ -903,8 +905,27 @@ fn main() -> Result<(), String> {
                 "- API stability / portability (Linux case sensitivity, CI)",
                 "- minimal diffs (prefer small fixes)",
                 "Avoid praise. If unsure, say what is missing.",
-                "Return a concise review with concrete, actionable fixes.",
                 "",
+                "Return STRICT JSON (no markdown) matching this shape:",
+                "{",
+                "  \"overall\": {",
+                "    \"score\": 0-100,",
+                "    \"verdict\": \"approve|request_changes|needs_context\",",
+                "    \"summary\": \"1-2 sentences\"",
+                "  },",
+                "  \"axes\": [",
+                "    {\"name\":\"correctness\",\"score\":0-100,\"summary\":\"...\"},",
+                "    {\"name\":\"proof_soundness\",\"score\":0-100,\"summary\":\"...\"},",
+                "    {\"name\":\"maintainability\",\"score\":0-100,\"summary\":\"...\"},",
+                "    {\"name\":\"risk\",\"score\":0-100,\"summary\":\"higher = riskier\"}",
+                "  ],",
+                "  \"top_issues\": [",
+                "    {\"severity\":\"high|medium|low\",\"title\":\"...\",\"detail\":\"...\",\"files\":[\"...\"]}",
+                "  ],",
+                "  \"quick_wins\": [\"...\"],",
+                "  \"questions\": [\"...\"],",
+                "  \"confidence\": 0.0-1.0",
+                "}",
             ]
             .join("\n");
 
@@ -951,14 +972,19 @@ fn main() -> Result<(), String> {
             ));
 
             let out = match res {
-                Ok(r) => json!({
+                Ok(r) => {
+                    let review_struct =
+                        serde_json::from_str::<serde_json::Value>(&r.content).ok();
+                    json!({
                     "repo_root": payload.get("repo_root").cloned().unwrap_or(serde_json::Value::Null),
                     "scope": payload.get("scope").cloned().unwrap_or(serde_json::Value::Null),
                     "provider": r.provider,
                     "model": r.model,
-                    "review": r.content,
+                    "review_text": r.content,
+                    "review_struct": review_struct,
                     "cache_key": payload.get("cache_key").cloned().unwrap_or(serde_json::Value::Null),
-                }),
+                    })
+                }
                 Err(e) => {
                     if require_key {
                         return Err(format!("review-diff failed: {e}"));
