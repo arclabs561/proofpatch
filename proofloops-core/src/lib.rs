@@ -23,7 +23,7 @@
 //!
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tempfile::NamedTempFile;
@@ -31,6 +31,117 @@ use tokio::process::Command;
 
 pub mod llm;
 pub mod review;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResearchSource {
+    pub url: String,
+    pub title: Option<String>,
+    pub snippet: Option<String>,
+    pub origin: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResearchNotes {
+    pub raw_urls: usize,
+    pub deduped_urls: usize,
+    pub sources: Vec<ResearchSource>,
+}
+
+fn is_urlish_key(k: &str) -> bool {
+    matches!(
+        k,
+        "url"
+            | "link"
+            | "href"
+            | "pdf_url"
+            | "pdfUrl"
+            | "arxiv_url"
+            | "arxivUrl"
+            | "paper_url"
+            | "paperUrl"
+    )
+}
+
+fn pick_string_field<'a>(obj: &'a serde_json::Map<String, serde_json::Value>, keys: &[&str]) -> Option<&'a str> {
+    for k in keys {
+        if let Some(v) = obj.get(*k).and_then(|v| v.as_str()) {
+            if !v.trim().is_empty() {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
+fn should_ignore_url(url: &str) -> bool {
+    // Avoid schema/self-referential noise.
+    url.contains("json-schema.org")
+        || url.contains("schemas.cursor")
+        || url.contains("localhost")
+        || url.starts_with("file:")
+}
+
+fn collect_research_sources(
+    v: &serde_json::Value,
+    out: &mut Vec<ResearchSource>,
+    seen: &mut HashSet<String>,
+    raw_urls: &mut usize,
+) {
+    match v {
+        serde_json::Value::Array(xs) => {
+            for x in xs {
+                collect_research_sources(x, out, seen, raw_urls);
+            }
+        }
+        serde_json::Value::Object(obj) => {
+            // If this object directly contains a URL field, emit a source.
+            for (k, vv) in obj.iter() {
+                if !is_urlish_key(k) {
+                    continue;
+                }
+                let Some(url) = vv.as_str() else {
+                    continue;
+                };
+                let url = url.trim();
+                if url.is_empty() || !url.starts_with("http") || should_ignore_url(url) {
+                    continue;
+                }
+                *raw_urls += 1;
+                if seen.insert(url.to_string()) {
+                    let title = pick_string_field(obj, &["title", "name"]).map(|s| s.to_string());
+                    let snippet = pick_string_field(obj, &["snippet", "summary", "content", "text", "abstract"])
+                        .map(|s| s.to_string());
+                    let origin = pick_string_field(obj, &["origin", "source", "server", "tool", "toolName"])
+                        .map(|s| s.to_string());
+                    out.push(ResearchSource {
+                        url: url.to_string(),
+                        title,
+                        snippet,
+                        origin,
+                    });
+                }
+            }
+
+            // Recurse into all children.
+            for vv in obj.values() {
+                collect_research_sources(vv, out, seen, raw_urls);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn ingest_research_json(v: &serde_json::Value) -> ResearchNotes {
+    let mut sources = Vec::new();
+    let mut seen = HashSet::new();
+    let mut raw_urls = 0usize;
+    collect_research_sources(v, &mut sources, &mut seen, &mut raw_urls);
+    ResearchNotes {
+        raw_urls,
+        deduped_urls: sources.len(),
+        sources,
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerifyResult {

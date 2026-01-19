@@ -64,6 +64,7 @@ fn usage() -> String {
         "  review-diff --repo <path> [--scope staged|worktree] [--prompt-only] [--require-key] [--timeout-s N] [--max-total-bytes N] [--per-file-bytes N] [--transcript-bytes N] [--cache-version STR] [--cache-model STR] [--output-json <path>]",
         "  lint-style  --repo <path> [--github] --module <Root> [--module <Root> ...]",
         "  report      --repo <path> --files <relpath>... [--timeout-s N] [--max-sorries N] [--context-lines N] [--include-raw-verify] [--output-html <path>]",
+        "  research-ingest --input <path> [--output-json <path>]",
         "  context-pack --repo <path> --file <relpath> [--decl <name> | --line N] [--context-lines N] [--nearby-lines N] [--max-nearby N] [--max-imports N]",
         "",
         "Notes:",
@@ -1169,6 +1170,33 @@ fn main() -> Result<(), String> {
                         format!("Lean proof {}", decl)
                     };
                     let web_q = format!("{q} mathlib Lean");
+                    let extract_schema = json!({
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "math_statement": { "type": "string" },
+                            "variables": {
+                                "type": "object",
+                                "additionalProperties": { "type": "string" }
+                            },
+                            "constraints": { "type": "array", "items": { "type": "string" } },
+                            "candidate_mathlib_lemmas": { "type": "array", "items": { "type": "string" } },
+                            "sources": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "title": { "type": "string" },
+                                        "url": { "type": "string" }
+                                    },
+                                    "required": ["url"]
+                                }
+                            }
+                        },
+                        "required": ["math_statement"]
+                    });
+
                     next_actions.push(json!({
                         "kind": "fix_sorry",
                         "file": file,
@@ -1186,6 +1214,25 @@ fn main() -> Result<(), String> {
                                     "server": "user-arxiv-semantic-search-mcp",
                                     "toolName": "search_papers",
                                     "arguments": { "query": q }
+                                },
+                                {
+                                    "server": "user-firecrawl-mcp",
+                                    "toolName": "firecrawl_search",
+                                    "arguments": {
+                                        "query": web_q,
+                                        "limit": 5,
+                                        "sources": [{"type": "web"}],
+                                        "scrapeOptions": {
+                                            "formats": [
+                                                {
+                                                    "type": "json",
+                                                    "prompt": "Extract: math_statement, variables (name->meaning), constraints, candidate_mathlib_lemmas, sources (url+title if present).",
+                                                    "schema": extract_schema
+                                                }
+                                            ],
+                                            "onlyMainContent": true
+                                        }
+                                    }
                                 },
                                 {
                                     "server": "user-tavily-remote-mcp",
@@ -1206,30 +1253,8 @@ fn main() -> Result<(), String> {
                                 ],
                                 "extract": {
                                     "schema": {
-                                        "type": "object",
-                                        "additionalProperties": false,
-                                        "properties": {
-                                            "math_statement": { "type": "string" },
-                                            "variables": {
-                                                "type": "object",
-                                                "additionalProperties": { "type": "string" }
-                                            },
-                                            "constraints": { "type": "array", "items": { "type": "string" } },
-                                            "candidate_mathlib_lemmas": { "type": "array", "items": { "type": "string" } },
-                                            "sources": {
-                                                "type": "array",
-                                                "items": {
-                                                    "type": "object",
-                                                    "additionalProperties": false,
-                                                    "properties": {
-                                                        "title": { "type": "string" },
-                                                        "url": { "type": "string" }
-                                                    },
-                                                    "required": ["url"]
-                                                }
-                                            }
-                                        },
-                                        "required": ["math_statement"]
+                                        "$ref": "#/definitions/extract_schema",
+                                        "definitions": { "extract_schema": extract_schema }
                                     }
                                 }
                             }
@@ -1419,6 +1444,31 @@ fn main() -> Result<(), String> {
             let out = serde_json::to_value(pack)
                 .map_err(|e| format!("failed to serialize context pack: {e}"))?;
             println!("{}", out.to_string());
+            Ok(())
+        }
+
+        "research-ingest" => {
+            let input = arg_value(rest, "--input")
+                .ok_or_else(|| "missing --input".to_string())
+                .map(PathBuf::from)?;
+            let output_json = arg_value(rest, "--output-json").map(PathBuf::from);
+
+            let txt = std::fs::read_to_string(&input)
+                .map_err(|e| format!("read {}: {e}", input.display()))?;
+            let v: serde_json::Value =
+                serde_json::from_str(&txt).map_err(|e| format!("json parse: {e}"))?;
+            let notes = plc::ingest_research_json(&v);
+            let out = serde_json::to_value(notes).map_err(|e| format!("json encode: {e}"))?;
+
+            if let Some(p) = output_json {
+                write_json(&p, &out)?;
+                println!(
+                    "{}",
+                    json!({"ok": true, "written": p.display().to_string()}).to_string()
+                );
+            } else {
+                println!("{}", out.to_string());
+            }
             Ok(())
         }
 
