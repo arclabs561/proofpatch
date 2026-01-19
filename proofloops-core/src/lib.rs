@@ -142,6 +142,12 @@ pub struct PromptPayload {
 pub struct SorryLocation {
     /// Matched token: `sorry` or `admit`.
     pub token: String,
+    /// Nearest enclosing declaration kind (best-effort): theorem|lemma|def|instance|abbrev|structure|class.
+    pub decl_kind: Option<String>,
+    /// Nearest enclosing declaration name (best-effort).
+    pub decl_name: Option<String>,
+    /// 1-based line number of the enclosing declaration header (best-effort).
+    pub decl_line: Option<usize>,
     /// 1-based line number.
     pub line: usize,
     /// 1-based column number (byte-based within the line; for display only).
@@ -736,6 +742,52 @@ pub fn locate_sorries_in_text(
         c.is_ascii_alphanumeric() || c == '_' || c == '\''
     }
 
+    fn parse_decl_header(line: &str) -> Option<(&'static str, String)> {
+        let t = line.trim_start();
+        // Best-effort: keep this conservative; it’s a hint, not a parser.
+        for kw in [
+            "theorem", "lemma", "def", "abbrev", "instance", "structure", "class",
+        ] {
+            let prefix = format!("{kw} ");
+            if let Some(rest) = t.strip_prefix(&prefix) {
+                let rest = rest.trim_start();
+                if rest.is_empty() {
+                    return None;
+                }
+                // name is the first token, stopping at whitespace or common delimiters
+                let mut name = String::new();
+                for ch in rest.chars() {
+                    if ch.is_whitespace() || matches!(ch, ':' | '(' | '{') {
+                        break;
+                    }
+                    name.push(ch);
+                }
+                if name.is_empty() {
+                    return None;
+                }
+                return Some((kw, name));
+            }
+        }
+        None
+    }
+
+    fn nearest_decl(
+        lines: &[&str],
+        line0: usize,
+    ) -> (Option<String>, Option<String>, Option<usize>) {
+        let mut i = usize::min(line0, lines.len().saturating_sub(1));
+        loop {
+            if let Some((kw, name)) = parse_decl_header(lines[i]) {
+                return (Some(kw.to_string()), Some(name), Some(i + 1));
+            }
+            if i == 0 {
+                break;
+            }
+            i -= 1;
+        }
+        (None, None, None)
+    }
+
     // Find `sorry`/`admit` occurrences that are not inside:
     // - line comments (`-- ...`)
     // - block comments (`/- ... -/`) [best-effort]
@@ -891,9 +943,13 @@ pub fn locate_sorries_in_text(
             let excerpt_start0 = region_start.saturating_sub(1).saturating_sub(context_lines);
             let excerpt_end0 = (region_end - 1 + context_lines).min(lines.len().saturating_sub(1));
             let excerpt = lines[excerpt_start0..=excerpt_end0].join("\n");
+            let (decl_kind, decl_name, decl_line) = nearest_decl(&lines, i0);
 
             out.push(SorryLocation {
                 token: token.to_string(),
+                decl_kind,
+                decl_name,
+                decl_line,
                 line: line_1,
                 col: col_1,
                 line_text: (*ln).to_string(),

@@ -1127,7 +1127,7 @@ fn main() -> Result<(), String> {
                     "<p><b>repo_root</b>: <code>{}</code></p>\n",
                     escape_html(&repo_root.display().to_string())
                 ));
-                html.push_str("<table>\n<thead><tr><th>file</th><th>verify</th><th>sorries</th></tr></thead>\n<tbody>\n");
+                html.push_str("<table>\n<thead><tr><th>file</th><th>verify</th><th>warnings (sample)</th><th>sorries</th></tr></thead>\n<tbody>\n");
 
                 for row in &table {
                     let file = row.get("file").and_then(|v| v.as_str()).unwrap_or("");
@@ -1167,13 +1167,29 @@ fn main() -> Result<(), String> {
                     html.push_str("<td>");
                     html.push_str(&format!("<b>count</b>: {}<br/>", sorries.len()));
                     for loc in sorries.iter().take(8) {
+                        let token = loc.get("token").and_then(|v| v.as_str()).unwrap_or("sorry");
+                        let decl_kind = loc
+                            .get("decl_kind")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let decl_name = loc
+                            .get("decl_name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let decl_label = if !decl_kind.is_empty() && !decl_name.is_empty() {
+                            format!("{} {}", decl_kind, decl_name)
+                        } else {
+                            "".to_string()
+                        };
                         let line = loc.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
                         let col = loc.get("col").and_then(|v| v.as_u64()).unwrap_or(0);
                         let excerpt = loc.get("excerpt").and_then(|v| v.as_str()).unwrap_or("");
                         html.push_str(&format!(
-                            "<div><b>@</b> {}:{}<pre>{}</pre></div>",
+                            "<div><b>@</b> {}:{} <code>{}</code> <code>{}</code><pre>{}</pre></div>",
                             line,
                             col,
+                            escape_html(token),
+                            escape_html(&decl_label),
                             escape_html(excerpt)
                         ));
                     }
