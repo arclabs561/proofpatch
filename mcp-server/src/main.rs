@@ -1,27 +1,27 @@
-//! proofyloops MCP server (HTTP via axum-mcp).
+//! proofloops MCP server (HTTP via axum-mcp).
 //!
-//! Exposes `proofyloops-core` as MCP tools over HTTP/stdio.
+//! Exposes `proofloops-core` as MCP tools over HTTP/stdio.
 //!
 //! Run:
 //! ```bash
-//! cd /Users/arc/Documents/dev/proofyloops/mcp-server
+//! cd /Users/arc/Documents/dev/proofloops/mcp-server
 //! cargo run
 //! ```
 //!
 //! Then:
 //! - `curl http://127.0.0.1:8087/health`
 //! - `curl http://127.0.0.1:8087/tools/list`
-//! - `curl -X POST http://127.0.0.1:8087/tools/call -H 'Content-Type: application/json' -d '{"name":"proofyloops_prompt","arguments":{"repo_root":"/Users/arc/Documents/dev/geometry-of-numbers","file":"Covolume/Legendre/Ankeny.lean","lemma":"ankeny_even_padicValNat_of_mem_primeFactors"}}'`
+//! - `curl -X POST http://127.0.0.1:8087/tools/call -H 'Content-Type: application/json' -d '{"name":"proofloops_prompt","arguments":{"repo_root":"/Users/arc/Documents/dev/geometry-of-numbers","file":"Covolume/Legendre/Ankeny.lean","lemma":"ankeny_even_padicValNat_of_mem_primeFactors"}}'`
 //!
 //! Configuration:
-//! - `PROOFYLOOPS_MCP_ADDR` (default: `127.0.0.1:8087`)
-//! - `PROOFYLOOPS_MCP_TOOL_TIMEOUT_S` (default: `180`)
+//! - `PROOFLOOPS_MCP_ADDR` (default: `127.0.0.1:8087`) (legacy: `PROOFYLOOPS_MCP_ADDR`)
+//! - `PROOFLOOPS_MCP_TOOL_TIMEOUT_S` (default: `180`) (legacy: `PROOFYLOOPS_MCP_TOOL_TIMEOUT_S`)
 
 use async_trait::async_trait;
 use axum_mcp::{
     extract_integer_opt, extract_string, extract_string_opt, McpServer, ServerConfig, Tool,
 };
-use proofyloops_core as plc;
+use proofloops_core as plc;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::time::Duration as StdDuration;
@@ -41,11 +41,11 @@ use schemars::JsonSchema;
 #[cfg(feature = "stdio")]
 use serde::Deserialize;
 
-fn default_proofyloops_root() -> PathBuf {
-    // `.../proofyloops/mcp-server` → `.../proofyloops`
+fn default_proofloops_root() -> PathBuf {
+    // `.../proofloops/mcp-server` → `.../proofloops`
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .expect("mcp-server should be nested under proofyloops/")
+        .expect("mcp-server should be nested under proofloops/")
         .to_path_buf()
 }
 
@@ -145,14 +145,20 @@ fn summarize_verify_like_output(raw: &Value) -> Value {
 // NOTE: The MCP server used to bridge to a Python CLI.
 // It is Rust-native now (proofyloops-core has the provider router), so there is no reason to shell out.
 
-fn proofyloops_root_from_args(args: &Value) -> Result<PathBuf, String> {
+fn proofloops_root_from_args(args: &Value) -> Result<PathBuf, String> {
+    if let Ok(env_root) = std::env::var("PROOFLOOPS_ROOT") {
+        if !env_root.trim().is_empty() {
+            return Ok(PathBuf::from(env_root));
+        }
+    }
     if let Ok(env_root) = std::env::var("PROOFYLOOPS_ROOT") {
         if !env_root.trim().is_empty() {
             return Ok(PathBuf::from(env_root));
         }
     }
-    let root = extract_string_opt(args, "proofyloops_root")
-        .unwrap_or_else(|| default_proofyloops_root().to_string_lossy().to_string());
+    let root = extract_string_opt(args, "proofloops_root")
+        .or_else(|| extract_string_opt(args, "proofyloops_root"))
+        .unwrap_or_else(|| default_proofloops_root().to_string_lossy().to_string());
     Ok(PathBuf::from(root))
 }
 
@@ -287,7 +293,7 @@ impl Tool for ProofyloopsSuggestTool {
         let timeout_s = extract_u64_opt(args, "timeout_s")?.unwrap_or(120);
         // Keep `proofyloops_root` in the schema for backward compatibility,
         // but do not shell out; use Rust core LLM router instead.
-        let _ = proofyloops_root_from_args(args)?;
+        let _ = proofloops_root_from_args(args)?;
 
         let payload = plc::build_proof_prompt(&repo_root, &file, &lemma)?;
         let res = plc::llm::chat_completion(
@@ -1207,7 +1213,7 @@ impl Tool for ProofyloopsLoopTool {
 
         // Rust-native loop for suggest + patch + verify.
         // Keep `proofyloops_root` in the schema for backward compatibility, but ignore it.
-        let _ = proofyloops_root_from_args(args)?;
+        let _ = proofloops_root_from_args(args)?;
         let repo_root = plc::find_lean_repo_root(&repo_root)?;
         plc::load_dotenv_smart(&repo_root);
 
@@ -1791,38 +1797,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let addr =
-        std::env::var("PROOFYLOOPS_MCP_ADDR").unwrap_or_else(|_| "127.0.0.1:8087".to_string());
+    let addr = std::env::var("PROOFLOOPS_MCP_ADDR")
+        .or_else(|_| std::env::var("PROOFYLOOPS_MCP_ADDR"))
+        .unwrap_or_else(|_| "127.0.0.1:8087".to_string());
 
     // The default axum-mcp tool timeout is 30s, but `lake build` / `lake env lean` can take longer
     // even on successful runs (big mathlib files + linters + first-time dependency builds).
     //
-    // Override with: PROOFYLOOPS_MCP_TOOL_TIMEOUT_S=900 (or larger)
-    let tool_timeout_s: u64 = std::env::var("PROOFYLOOPS_MCP_TOOL_TIMEOUT_S")
+    // Override with: PROOFLOOPS_MCP_TOOL_TIMEOUT_S=900 (or larger)
+    let tool_timeout_s: u64 = std::env::var("PROOFLOOPS_MCP_TOOL_TIMEOUT_S")
+        .or_else(|_| std::env::var("PROOFYLOOPS_MCP_TOOL_TIMEOUT_S"))
         .ok()
         .and_then(|s| s.trim().parse::<u64>().ok())
         .unwrap_or(180);
     let config = ServerConfig::new().with_tool_timeout(StdDuration::from_secs(tool_timeout_s));
 
     let server = McpServer::with_config(config)
-        .tool("proofyloops_prompt", ProofyloopsPromptTool)?
-        .tool("proofyloops_verify", ProofyloopsVerifyTool)?
-        .tool("proofyloops_verify_summary", ProofyloopsVerifySummaryTool)?
-        .tool("proofyloops_suggest", ProofyloopsSuggestTool)?
-        .tool("proofyloops_patch", ProofyloopsPatchTool)?
-        .tool("proofyloops_patch_region", ProofyloopsPatchRegionTool)?
-        .tool("proofyloops_locate_sorries", ProofyloopsLocateSorriesTool)?
-        .tool("proofyloops_context_pack", ProofyloopsContextPackTool)?
-        .tool("proofyloops_triage_file", ProofyloopsTriageFileTool)?
-        .tool("proofyloops_agent_step", ProofyloopsAgentStepTool)?
-        .tool("proofyloops_report_html", ProofyloopsReportHtmlTool)?
+        .tool("proofloops_prompt", ProofyloopsPromptTool)?
+        .tool("proofloops_verify", ProofyloopsVerifyTool)?
+        .tool("proofloops_verify_summary", ProofyloopsVerifySummaryTool)?
+        .tool("proofloops_suggest", ProofyloopsSuggestTool)?
+        .tool("proofloops_patch", ProofyloopsPatchTool)?
+        .tool("proofloops_patch_region", ProofyloopsPatchRegionTool)?
+        .tool("proofloops_locate_sorries", ProofyloopsLocateSorriesTool)?
+        .tool("proofloops_context_pack", ProofyloopsContextPackTool)?
+        .tool("proofloops_triage_file", ProofyloopsTriageFileTool)?
+        .tool("proofloops_agent_step", ProofyloopsAgentStepTool)?
+        .tool("proofloops_report_html", ProofyloopsReportHtmlTool)?
         .tool(
-            "proofyloops_rubberduck_prompt",
+            "proofloops_rubberduck_prompt",
             ProofyloopsRubberduckPromptTool,
         )?
-        .tool("proofyloops_loop", ProofyloopsLoopTool)?;
+        .tool("proofloops_loop", ProofyloopsLoopTool)?;
 
-    eprintln!("proofyloops MCP server listening on http://{addr}");
+    eprintln!("proofloops MCP server listening on http://{addr}");
     server.serve(&addr).await?;
     Ok(())
 }

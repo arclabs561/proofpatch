@@ -1,4 +1,4 @@
-use proofyloops_core as plc;
+use proofloops_core as plc;
 
 #[test]
 fn patch_decl_inline_def_replaces_token_only() {

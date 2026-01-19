@@ -1,4 +1,4 @@
-use proofyloops_core as plc;
+use proofloops_core as plc;
 use serde_json::json;
 use std::path::PathBuf;
 use std::time::Duration as StdDuration;
@@ -50,7 +50,7 @@ fn write_json(path: &std::path::Path, value: &serde_json::Value) -> Result<(), S
 
 fn usage() -> String {
     [
-        "proofyloops (Rust) — direct CLI (no MCP).",
+        "proofloops (Rust) — direct CLI (no MCP).",
         "",
         "Commands:",
         "  triage-file --repo <path> --file <relpath> [--timeout-s N] [--max-sorries N] [--context-lines N] [--no-context-pack] [--no-prompts] [--output-json <path>]",
@@ -67,7 +67,7 @@ fn usage() -> String {
         "",
         "Notes:",
         "- Output is JSON to stdout.",
-        "- This CLI uses proofyloops-core, so verification runs `lake env lean` on the *real* file path.",
+        "- This CLI uses proofloops-core, so verification runs `lake env lean` on the *real* file path.",
         "- HTML is optional; it’s intended for humans. Agents should consume the JSON table.",
     ]
     .join("\n")
@@ -1056,10 +1056,10 @@ fn main() -> Result<(), String> {
 
                 let mut html = String::new();
                 html.push_str("<!doctype html>\n<html><head><meta charset=\"utf-8\"/>\n");
-                html.push_str("<title>proofyloops report</title>\n");
+                html.push_str("<title>proofloops report</title>\n");
                 html.push_str("<style>body{font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial;max-width:1200px;margin:24px auto;padding:0 16px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px;vertical-align:top}th{background:#f6f6f6;text-align:left}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",monospace}pre{white-space:pre-wrap}</style>\n");
                 html.push_str("</head><body>\n");
-                html.push_str("<h2>proofyloops report</h2>\n");
+                html.push_str("<h2>proofloops report</h2>\n");
                 html.push_str(&format!(
                     "<p><b>repo_root</b>: <code>{}</code></p>\n",
                     escape_html(&repo_root.display().to_string())

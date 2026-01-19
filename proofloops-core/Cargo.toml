@@ -1,10 +1,10 @@
 [package]
-name = "proofyloops-core"
+name = "proofloops-core"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
-description = "Rust core for proofyloops (Lean excerpt/patch/verify + prompt construction)"
+description = "Rust core for proofloops (Lean excerpt/patch/verify + prompt construction)"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
@@ -19,6 +19,11 @@ sha2 = "0.10.9"
 hex = "0.4.3"
 
 [[bin]]
+name = "proofloops"
+path = "src/bin/proofloops.rs"
+
+[[bin]]
+# Compatibility alias: historical CLI name.
 name = "proofyloops"
 path = "src/bin/proofyloops.rs"
 

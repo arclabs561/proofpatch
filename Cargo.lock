@@ -1334,7 +1334,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "proofyloops-core"
+name = "proofloops-core"
 version = "0.1.0"
 dependencies = [
  "dirs",
@@ -1349,13 +1349,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "proofyloops-mcp"
+name = "proofloops-mcp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "axum-mcp",
- "proofyloops-core",
+ "proofloops-core",
  "rmcp",
  "schemars",
  "serde",

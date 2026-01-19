@@ -1,6 +1,6 @@
-//! Smoke test for `proofyloops-mcp mcp-stdio`.
+//! Smoke test for `proofloops-mcp mcp-stdio`.
 //!
-//! This starts a child process running `proofyloops-mcp mcp-stdio` and calls a couple tools.
+//! This starts a child process running `proofloops-mcp mcp-stdio` and calls a couple tools.
 //! It validates the stdio MCP surface without relying on Cursor as the client.
 
 #[cfg(not(feature = "stdio"))]
@@ -26,16 +26,16 @@ use tokio::process::Command;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let bin = root.join("target/debug/proofyloops-mcp");
+    let bin = root.join("target/debug/proofloops-mcp");
     eprintln!("spawning: {} mcp-stdio", bin.display());
 
     // Make the smoke test independent of any particular repo layout.
     //
     // Default to a known Lean repo inside this workspace if the env var isn't set.
     // (This path is local developer convenience, not a public contract.)
-    let repo_root = std::env::var("PROOFYLOOPS_SMOKE_REPO_ROOT")
+    let repo_root = std::env::var("PROOFLOOPS_SMOKE_REPO_ROOT")
         .unwrap_or_else(|_| "/Users/arc/Documents/dev/geometry-of-numbers".to_string());
-    let file = std::env::var("PROOFYLOOPS_SMOKE_FILE")
+    let file = std::env::var("PROOFLOOPS_SMOKE_FILE")
         .unwrap_or_else(|_| "Covolume/Cauchy/Main.lean".to_string());
 
     let service = ()
@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
     // Keep this cheap: triage one file with a small timeout.
     let triage = service
         .call_tool(CallToolRequestParam {
-            name: "proofyloops_triage_file".into(),
+            name: "proofloops_triage_file".into(),
             arguments: Some(
                 serde_json::json!({
                     "repo_root": repo_root.clone(),
@@ -70,11 +70,11 @@ async fn main() -> anyhow::Result<()> {
             ),
         })
         .await?;
-    println!("proofyloops_triage_file: {:#?}", triage);
+    println!("proofloops_triage_file: {:#?}", triage);
 
     let pack = service
         .call_tool(CallToolRequestParam {
-            name: "proofyloops_context_pack".into(),
+            name: "proofloops_context_pack".into(),
             arguments: Some(
                 serde_json::json!({
                     "repo_root": repo_root.clone(),
@@ -91,11 +91,11 @@ async fn main() -> anyhow::Result<()> {
             ),
         })
         .await?;
-    println!("proofyloops_context_pack: {:#?}", pack);
+    println!("proofloops_context_pack: {:#?}", pack);
 
     let step = service
         .call_tool(CallToolRequestParam {
-            name: "proofyloops_agent_step".into(),
+            name: "proofloops_agent_step".into(),
             arguments: Some(
                 serde_json::json!({
                     "repo_root": repo_root.clone(),
@@ -109,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
             ),
         })
         .await?;
-    println!("proofyloops_agent_step: {:#?}", step);
+    println!("proofloops_agent_step: {:#?}", step);
 
     service.cancel().await?;
     Ok(())

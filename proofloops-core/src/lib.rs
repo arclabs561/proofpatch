@@ -202,9 +202,10 @@ fn looks_like_missing_olean(stdout: &str, stderr: &str) -> bool {
 /// Never overrides existing env vars.
 ///
 /// Controls:
-/// - `PROOFYLOOPS_MCP_JSON_PATH`: override path to mcp.json (useful for tests)
+/// - `PROOFLOOPS_MCP_JSON_PATH`: override path to mcp.json (useful for tests) (legacy: `PROOFYLOOPS_MCP_JSON_PATH`)
 pub fn load_cursor_mcp_env_if_present() {
-    let p = std::env::var("PROOFYLOOPS_MCP_JSON_PATH")
+    let p = std::env::var("PROOFLOOPS_MCP_JSON_PATH")
+        .or_else(|_| std::env::var("PROOFYLOOPS_MCP_JSON_PATH"))
         .ok()
         .filter(|s| !s.trim().is_empty())
         .map(PathBuf::from)
@@ -245,8 +246,8 @@ pub fn load_cursor_mcp_env_if_present() {
 ///   containing `OPENROUTER_API_KEY` or `OPENAI_API_KEY`
 ///
 /// Controls (all optional):
-/// - `PROOFYLOOPS_DOTENV_SEARCH` (default: on): set to 0/false/off to disable
-/// - `PROOFYLOOPS_DOTENV_SEARCH_ROOT` (default: repo_root.parent): override search root
+/// - `PROOFLOOPS_DOTENV_SEARCH` (default: on): set to 0/false/off to disable (legacy: `PROOFYLOOPS_DOTENV_SEARCH`)
+/// - `PROOFLOOPS_DOTENV_SEARCH_ROOT` (default: repo_root.parent): override search root (legacy: `PROOFYLOOPS_DOTENV_SEARCH_ROOT`)
 pub fn load_dotenv_smart(repo_root: &Path) {
     // Base: repo-local .env
     load_dotenv_if_present(repo_root);
@@ -258,11 +259,14 @@ pub fn load_dotenv_smart(repo_root: &Path) {
         return;
     }
 
-    if !env_truthy("PROOFYLOOPS_DOTENV_SEARCH", true) {
+    if !env_truthy("PROOFLOOPS_DOTENV_SEARCH", true)
+        && !env_truthy("PROOFYLOOPS_DOTENV_SEARCH", true)
+    {
         return;
     }
 
-    let search_root = std::env::var("PROOFYLOOPS_DOTENV_SEARCH_ROOT")
+    let search_root = std::env::var("PROOFLOOPS_DOTENV_SEARCH_ROOT")
+        .or_else(|_| std::env::var("PROOFYLOOPS_DOTENV_SEARCH_ROOT"))
         .ok()
         .filter(|s| !s.trim().is_empty())
         .map(PathBuf::from)

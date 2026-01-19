@@ -66,8 +66,8 @@ fn providers_from_env() -> Vec<Provider> {
 fn provider_order() -> Vec<String> {
     // Preserve legacy env fallbacks (proofyloops/proofloops/leanpot).
     for k in [
-        "PROOFYLOOPS_PROVIDER_ORDER",
         "PROOFLOOPS_PROVIDER_ORDER",
+        "PROOFYLOOPS_PROVIDER_ORDER",
         "LEANPOT_PROVIDER_ORDER",
     ] {
         if let Ok(v) = std::env::var(k) {
@@ -151,7 +151,7 @@ async fn select_provider(timeout: Duration) -> Result<(Provider, String), String
 - GROQ_API_KEY and GROQ_MODEL\n\
 - OPENROUTER_API_KEY and OPENROUTER_MODEL\n\
 - OPENAI_API_KEY and OPENAI_MODEL\n\
-Optionally set PROOFYLOOPS_PROVIDER_ORDER."
+Optionally set PROOFLOOPS_PROVIDER_ORDER (legacy: PROOFYLOOPS_PROVIDER_ORDER)."
         .to_string())
 }
 
