@@ -56,6 +56,7 @@ fn usage() -> String {
         "  triage-file --repo <path> --file <relpath> [--timeout-s N] [--max-sorries N] [--context-lines N] [--no-context-pack] [--no-prompts] [--output-json <path>]",
         "  agent-step  --repo <path> --file <relpath> [--timeout-s N] [--write] [--output-json <path>]",
         "  prompt      --repo <path> --file <relpath> --lemma <name> [--output-json <path>]",
+        "  rubberduck-prompt --repo <path> --file <relpath> --lemma <name> [--diagnostics-file <path>] [--output-json <path>]",
         "  patch       --repo <path> --file <relpath> --lemma <name> --replacement-file <path> [--timeout-s N] [--output-json <path>]",
         "  suggest     --repo <path> --file <relpath> --lemma <name> [--timeout-s N] [--output-json <path>]",
         "  loop        --repo <path> --file <relpath> --lemma <name> [--max-iters N] [--timeout-s N] [--output-json <path>]",
@@ -530,6 +531,48 @@ fn main() -> Result<(), String> {
             plc::load_dotenv_smart(&repo_root);
 
             let payload = plc::build_proof_prompt(&repo_root, &file, &lemma)?;
+            let out = serde_json::to_value(payload).map_err(|e| format!("json encode: {e}"))?;
+
+            if let Some(p) = output_json {
+                write_json(&p, &out)?;
+                println!(
+                    "{}",
+                    json!({"ok": true, "written": p.display().to_string()}).to_string()
+                );
+            } else {
+                println!("{}", out.to_string());
+            }
+            Ok(())
+        }
+
+        "rubberduck-prompt" => {
+            let repo_root = arg_value(rest, "--repo")
+                .ok_or_else(|| "missing --repo".to_string())
+                .map(PathBuf::from)?;
+            let file = arg_value(rest, "--file").ok_or_else(|| "missing --file".to_string())?;
+            let lemma = arg_value(rest, "--lemma").ok_or_else(|| "missing --lemma".to_string())?;
+            let diagnostics_file = arg_value(rest, "--diagnostics-file").map(PathBuf::from);
+            let output_json = arg_value(rest, "--output-json").map(PathBuf::from);
+
+            let repo_root =
+                plc::find_lean_repo_root(&repo_root).map_err(|e| format!("repo_root: {e}"))?;
+            plc::load_dotenv_smart(&repo_root);
+
+            let diagnostics = if let Some(p) = diagnostics_file {
+                Some(
+                    std::fs::read_to_string(&p)
+                        .map_err(|e| format!("read {}: {e}", p.display()))?,
+                )
+            } else {
+                None
+            };
+
+            let payload = plc::build_rubberduck_prompt(
+                &repo_root,
+                &file,
+                &lemma,
+                diagnostics.as_deref(),
+            )?;
             let out = serde_json::to_value(payload).map_err(|e| format!("json encode: {e}"))?;
 
             if let Some(p) = output_json {

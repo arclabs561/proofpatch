@@ -1164,7 +1164,6 @@ impl Tool for ProofloopsRubberduckPromptTool {
                 "file": { "type": "string" },
                 "lemma": { "type": "string" },
                 "diagnostics": { "type": "string", "description": "Optional Lean output/error context to include (raw stdout/stderr excerpt or JSON)" },
-                "proofloops_root": { "type": "string" },
                 "proofloops_root": { "type": "string" }
             },
             "required": ["repo_root", "file", "lemma"]
@@ -1199,7 +1198,6 @@ impl Tool for ProofloopsLoopTool {
                 "lemma": { "type": "string" },
                 "max_iters": { "type": "integer", "default": 3 },
                 "timeout_s": { "type": "integer", "default": 120 },
-                "proofloops_root": { "type": "string" },
                 "proofloops_root": { "type": "string" }
             },
             "required": ["repo_root", "file", "lemma"]
@@ -1424,6 +1422,51 @@ struct SuggestArgs {
     // Schema compatibility only (unused).
     #[serde(default)]
     proofloops_root: Option<String>,
+}
+
+#[cfg(feature = "stdio")]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+struct RubberduckArgs {
+    repo_root: String,
+    file: String,
+    lemma: String,
+    #[serde(default)]
+    diagnostics: Option<String>,
+    // Schema compatibility only (unused).
+    #[serde(default)]
+    proofloops_root: Option<String>,
+}
+
+#[cfg(feature = "stdio")]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+struct LoopArgs {
+    repo_root: String,
+    file: String,
+    lemma: String,
+    #[serde(default)]
+    max_iters: Option<u64>,
+    #[serde(default)]
+    timeout_s: Option<u64>,
+    // Schema compatibility only (unused).
+    #[serde(default)]
+    proofloops_root: Option<String>,
+}
+
+#[cfg(feature = "stdio")]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+struct ReportHtmlArgs {
+    repo_root: String,
+    files: Vec<String>,
+    #[serde(default)]
+    timeout_s: Option<u64>,
+    #[serde(default)]
+    max_sorries: Option<u64>,
+    #[serde(default)]
+    context_lines: Option<u64>,
+    #[serde(default)]
+    include_raw_verify: Option<bool>,
+    #[serde(default)]
+    output_path: Option<String>,
 }
 
 #[cfg(feature = "stdio")]
@@ -1666,7 +1709,8 @@ impl ProofloopsStdioMcp {
     // These delegate to the existing `axum-mcp` Tool implementations so HTTP
     // and stdio stay behaviorally consistent.
     //
-    // Note: these take `serde_json::Value` params for minimal duplication.
+    // Some endpoints use typed `JsonSchema` arg structs (better UX in Cursor); others keep
+    // `serde_json::Value` to avoid duplicating schemas for less frequently used tools.
     // ---------------------------------------------------------------------
 
     #[tool(description = "Extract the (system,user) prompt + excerpt for a lemma (`proofloops prompt`).")]
@@ -1777,11 +1821,13 @@ impl ProofloopsStdioMcp {
     #[tool(description = "Build a rubberduck/ideation prompt for a lemma (no proof code; plan + next moves).")]
     async fn proofloops_rubberduck_prompt(
         &self,
-        params: Parameters<serde_json::Value>,
+        params: Parameters<RubberduckArgs>,
     ) -> Result<CallToolResult, McpError> {
         let tool = ProofloopsRubberduckPromptTool;
+        let v = serde_json::to_value(&params.0)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
         let out = tool
-            .call(&params.0)
+            .call(&v)
             .await
             .map_err(|e| McpError::invalid_params(e, None))?;
         Ok(CallToolResult::success(vec![Content::text(out.to_string())]))
@@ -1790,11 +1836,13 @@ impl ProofloopsStdioMcp {
     #[tool(description = "Bounded loop: suggest → patch first `sorry` in lemma → verify (`proofloops loop`).")]
     async fn proofloops_loop(
         &self,
-        params: Parameters<serde_json::Value>,
+        params: Parameters<LoopArgs>,
     ) -> Result<CallToolResult, McpError> {
         let tool = ProofloopsLoopTool;
+        let v = serde_json::to_value(&params.0)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
         let out = tool
-            .call(&params.0)
+            .call(&v)
             .await
             .map_err(|e| McpError::internal_error(e, None))?;
         Ok(CallToolResult::success(vec![Content::text(out.to_string())]))
@@ -1953,12 +2001,14 @@ impl ProofloopsStdioMcp {
     #[tool(description = "Triage many files and write a small HTML report")]
     async fn proofloops_report_html(
         &self,
-        params: Parameters<serde_json::Value>,
+        params: Parameters<ReportHtmlArgs>,
     ) -> Result<CallToolResult, McpError> {
         // Delegate to the existing Tool implementation to avoid duplicating report logic.
         let tool = ProofloopsReportHtmlTool;
+        let v = serde_json::to_value(&params.0)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
         let out = tool
-            .call(&params.0)
+            .call(&v)
             .await
             .map_err(|e| McpError::internal_error(e, None))?;
         Ok(CallToolResult::success(vec![Content::text(

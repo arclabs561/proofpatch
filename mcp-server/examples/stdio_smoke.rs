@@ -105,6 +105,45 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     println!("proofloops_context_pack: {:#?}", pack);
 
+    // Exercise the expanded stdio surface (typed schemas).
+    let locate = service
+        .call_tool(CallToolRequestParam {
+            name: "proofloops_locate_sorries".into(),
+            arguments: Some(
+                serde_json::json!({
+                    "repo_root": repo_root.clone(),
+                    "file": "Covolume/Legendre/Main.lean",
+                    "max_results": 10,
+                    "context_lines": 2
+                })
+                .as_object()
+                .cloned()
+                .unwrap_or_default(),
+            ),
+        })
+        .await?;
+    println!("proofloops_locate_sorries (Legendre/Main): {:#?}", locate);
+
+    let rubberduck = service
+        .call_tool(CallToolRequestParam {
+            name: "proofloops_rubberduck_prompt".into(),
+            arguments: Some(
+                serde_json::json!({
+                    "repo_root": repo_root.clone(),
+                    "file": "Covolume/Legendre/Main.lean",
+                    "lemma": "sum_three_squares_of_not_exception"
+                })
+                .as_object()
+                .cloned()
+                .unwrap_or_default(),
+            ),
+        })
+        .await?;
+    println!(
+        "proofloops_rubberduck_prompt (Legendre/Main.sum_three_squares_of_not_exception): {:#?}",
+        rubberduck
+    );
+
     let step = service
         .call_tool(CallToolRequestParam {
             name: "proofloops_agent_step".into(),
