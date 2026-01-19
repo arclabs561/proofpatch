@@ -1070,13 +1070,33 @@ fn main() -> Result<(), String> {
                     stdout.matches(": error:").count() + stderr.matches(": error:").count();
                 let warnings =
                     stdout.matches(": warning:").count() + stderr.matches(": warning:").count();
+                let error_samples: Vec<String> = stdout
+                    .lines()
+                    .chain(stderr.lines())
+                    .filter(|l| l.contains(": error:"))
+                    .take(8)
+                    .map(|s| s.to_string())
+                    .collect();
+                let warning_samples: Vec<String> = stdout
+                    .lines()
+                    .chain(stderr.lines())
+                    .filter(|l| l.contains(": warning:"))
+                    .take(8)
+                    .map(|s| s.to_string())
+                    .collect();
 
                 let locs =
                     plc::locate_sorries_in_file(&repo_root, file, max_sorries, context_lines)?;
 
                 table.push(json!({
                     "file": file,
-                    "verify": { "ok": ok, "errors": errors, "warnings": warnings },
+                    "verify": {
+                        "ok": ok,
+                        "errors": errors,
+                        "warnings": warnings,
+                        "error_samples": error_samples,
+                        "warning_samples": warning_samples,
+                    },
                     "sorries": { "count": locs.len(), "locations": locs },
                 }));
 
@@ -1115,6 +1135,11 @@ fn main() -> Result<(), String> {
                     let ok = verify.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
                     let errors = verify.get("errors").and_then(|v| v.as_u64()).unwrap_or(0);
                     let warnings = verify.get("warnings").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let warning_samples = verify
+                        .get("warning_samples")
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default();
                     let sorries = row
                         .get("sorries")
                         .and_then(|v| v.get("locations"))
@@ -1128,6 +1153,17 @@ fn main() -> Result<(), String> {
                         "<td><b>ok</b>: {}<br/><b>errors</b>: {}<br/><b>warnings</b>: {}</td>",
                         ok, errors, warnings
                     ));
+                    if !warning_samples.is_empty() {
+                        html.push_str("<td><b>warnings (sample)</b><pre>");
+                        for w in warning_samples.iter().take(6) {
+                            let s = w.as_str().unwrap_or("");
+                            html.push_str(&escape_html(s));
+                            html.push('\n');
+                        }
+                        html.push_str("</pre></td>");
+                    } else {
+                        html.push_str("<td><b>warnings (sample)</b><pre>(none)</pre></td>");
+                    }
                     html.push_str("<td>");
                     html.push_str(&format!("<b>count</b>: {}<br/>", sorries.len()));
                     for loc in sorries.iter().take(8) {
